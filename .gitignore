@@ -1,0 +1,40 @@
+# =====================================================================
+# Archivos de Base de Datos y Binarios Locales
+# =====================================================================
+*.dbf
+*.DBF
+*.dmp
+*.DMP
+*.log
+*.LOG
+*.tmp
+*.bak
+
+# =====================================================================
+# Dependencias y Salidas de Compilación (Node / Frontend / Python)
+# =====================================================================
+node_modules/
+dist/
+build/
+.next/
+__pycache__/
+*.pyc
+.env
+.env.local
+.env.*.local
+
+# =====================================================================
+# Archivos Temporales de Sistema Operativo e IDEs
+# =====================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.idea/
+
+# Mantener configuración compartida de VS Code (.vscode/settings.json)
+.vscode/*
+!.vscode/settings.json
