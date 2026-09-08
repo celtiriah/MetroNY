@@ -7,8 +7,26 @@
 --   sqlplus / as sysdba @01_configuracion_usuario.ddl
 --------------------------------------------------------------------------------
 
--- 1. Cambiar a la base de datos del proyecto
-ALTER SESSION SET CONTAINER = FREEPDB1;
+-- 1. Auto-detección y cambio dinámico al Pluggable Database activo (FREEPDB1, XEPDB1, etc.)
+SET SERVEROUTPUT ON;
+DECLARE
+    v_pdb VARCHAR2(30);
+BEGIN
+    SELECT name INTO v_pdb 
+    FROM v$pdbs 
+    WHERE name != 'PDB$SEED' AND open_mode = 'READ WRITE' AND ROWNUM = 1;
+    
+    EXECUTE IMMEDIATE 'ALTER SESSION SET CONTAINER = ' || v_pdb;
+    DBMS_OUTPUT.PUT_LINE('Conectado exitosamente al Pluggable Database: ' || v_pdb);
+EXCEPTION
+    WHEN OTHERS THEN
+        BEGIN
+            EXECUTE IMMEDIATE 'ALTER SESSION SET CONTAINER = FREEPDB1';
+        EXCEPTION
+            WHEN OTHERS THEN NULL;
+        END;
+END;
+/
 
 -- 2. Borrar el usuario anterior con todos sus objetos
 BEGIN

@@ -387,7 +387,7 @@ CREATE TABLE CERTIFICACION_MODELO
     LOGGING 
 ;
 
-COMMENT ON TABLE CERTIFICACION_MODELO IS 'Modelos de tren que una certificación autoriza operar (atributo multivíaluado de CERTIFICACION).'
+COMMENT ON TABLE CERTIFICACION_MODELO IS 'Modelos de tren que una certificación autoriza operar (atributo multivaluado de CERTIFICACION).'
 ;
 
 COMMENT ON COLUMN CERTIFICACION_MODELO.id_certificacion_modelo IS 'Identificador único' 
@@ -463,7 +463,7 @@ ALTER TABLE EMPLEADO
 
 ALTER TABLE EMPLEADO 
     ADD CONSTRAINT CK_EMPLEADO_ESTADO_LABORAL 
-    CHECK (estado_laboral IN ('Activo', 'Permiso', 'Retirado', 'Suspendido', 'Víacaciones')) 
+    CHECK (estado_laboral IN ('Activo', 'Permiso', 'Retirado', 'Suspendido', 'Vacaciones')) 
 ;
 
 COMMENT ON TABLE EMPLEADO IS 'Personal operativo del metro.'
@@ -487,7 +487,7 @@ COMMENT ON COLUMN EMPLEADO.cargo IS 'CHECK: Conductor, Operador de Control, Supe
 COMMENT ON COLUMN EMPLEADO.turno_habitual IS 'p.ej. Matutino, Vespertino, Nocturno' 
 ;
 
-COMMENT ON COLUMN EMPLEADO.estado_laboral IS 'CHECK: Activo, Víacaciones, Permiso, Suspendido, Retirado' 
+COMMENT ON COLUMN EMPLEADO.estado_laboral IS 'CHECK: Activo, Vacaciones, Permiso, Suspendido, Retirado' 
 ;
 
 COMMENT ON COLUMN EMPLEADO.supervisor_id IS '-> EMPLEADO (autorreferencia)' 
@@ -523,7 +523,7 @@ CREATE TABLE EQUIPO
 
 ALTER TABLE EQUIPO 
     ADD CONSTRAINT CK_EQUIPO_TIPO_EQUIPO 
-    CHECK (tipo_equipo IN ('Elevíador', 'Escalera Eléctrica', 'Plataforma', 'Señal', 'Tren', 'Víagón', 'Vía')) 
+    CHECK (tipo_equipo IN ('Elevador', 'Escalera Eléctrica', 'Plataforma', 'Señal', 'Tren', 'Vagón', 'Vía')) 
 ;
 
 ALTER TABLE EQUIPO 
@@ -536,7 +536,7 @@ ALTER TABLE EQUIPO
     CHECK (estado IN ('Disponible', 'En Mantenimiento', 'Fuera de Servicio')) 
 ;
 
-COMMENT ON TABLE EQUIPO IS 'Activo mantenible: vía, señal, plataforma, elevíador, escalera, tren o víagón.'
+COMMENT ON TABLE EQUIPO IS 'Activo mantenible: vía, señal, plataforma, elevador, escalera, tren o vagón.'
 ;
 
 COMMENT ON COLUMN EQUIPO.id_equipo IS 'Identificador único' 
@@ -545,7 +545,7 @@ COMMENT ON COLUMN EQUIPO.id_equipo IS 'Identificador único'
 COMMENT ON COLUMN EQUIPO.codigo_equipo IS 'UNIQUE, NOT NULL' 
 ;
 
-COMMENT ON COLUMN EQUIPO.tipo_equipo IS 'CHECK: Vía, Señal, Plataforma, Elevíador, Escalera Eléctrica, Tren, Víagón' 
+COMMENT ON COLUMN EQUIPO.tipo_equipo IS 'CHECK: Vía, Señal, Plataforma, Elevador, Escalera Eléctrica, Tren, Vagón' 
 ;
 
 COMMENT ON COLUMN EQUIPO.tipo_referencia IS 'CHECK: ESTACION, PLATAFORMA, TREN, VAGON, NINGUNO' 
@@ -577,7 +577,7 @@ CREATE TABLE ESTACION
      cantidad_plataformas             NUMBER (2) , 
      estado_operativo                 VARCHAR2 (25) , 
      horario_funcionamiento           VARCHAR2 (50) , 
-     elevíadores_disponibles           CHAR (1) , 
+     elevadores_disponibles           CHAR (1) , 
      escaleras_electricas_disponibles CHAR (1) , 
      accesible_discapacidad           CHAR (1) , 
      tipo_estacion                    VARCHAR2 (20) 
@@ -592,12 +592,12 @@ ALTER TABLE ESTACION
 
 ALTER TABLE ESTACION 
     ADD CONSTRAINT CK_ESTACION_ESTADO_OPERATIVO 
-    CHECK (estado_operativo IN ('Cerrada', 'Cerrada Temporalmente', 'Operativía')) 
+    CHECK (estado_operativo IN ('Cerrada', 'Cerrada Temporalmente', 'Operativa')) 
 ;
 
 ALTER TABLE ESTACION 
     ADD CONSTRAINT CK_ESTACION_ELEVADORES_DI_9827 
-    CHECK (elevíadores_disponibles IN ('N', 'S')) 
+    CHECK (elevadores_disponibles IN ('N', 'S')) 
 ;
 
 ALTER TABLE ESTACION 
@@ -615,7 +615,7 @@ ALTER TABLE ESTACION
     CHECK (tipo_estacion IN ('Cerrada Temporalmente', 'Expresa', 'Local', 'Terminal', 'Transferencia')) 
 ;
 
-COMMENT ON TABLE ESTACION IS 'Estación del sistema, puede ser usada por víarias líneas.'
+COMMENT ON TABLE ESTACION IS 'Estación del sistema, puede ser usada por varias líneas.'
 ;
 
 COMMENT ON COLUMN ESTACION.id_estacion IS 'Identificador interno' 
@@ -633,13 +633,13 @@ COMMENT ON COLUMN ESTACION.distrito IS 'CHECK: Manhattan, Brooklyn, Queens, The 
 COMMENT ON COLUMN ESTACION.cantidad_plataformas IS 'Campo resumen; el detalle vive en PLATAFORMA' 
 ;
 
-COMMENT ON COLUMN ESTACION.estado_operativo IS 'CHECK: Operativía, Cerrada Temporalmente, Cerrada' 
+COMMENT ON COLUMN ESTACION.estado_operativo IS 'CHECK: Operativa, Cerrada Temporalmente, Cerrada' 
 ;
 
 COMMENT ON COLUMN ESTACION.horario_funcionamiento IS 'p.ej. 24 horas / 05:00-01:00' 
 ;
 
-COMMENT ON COLUMN ESTACION.elevíadores_disponibles IS 'CHECK: S, N' 
+COMMENT ON COLUMN ESTACION.elevadores_disponibles IS 'CHECK: S, N' 
 ;
 
 COMMENT ON COLUMN ESTACION.escaleras_electricas_disponibles IS 'CHECK: S, N' 
@@ -736,7 +736,7 @@ COMMENT ON COLUMN HORARIO.hora_inicio IS 'Componente de hora'
 COMMENT ON COLUMN HORARIO.hora_fin IS 'Componente de hora' 
 ;
 
-COMMENT ON COLUMN HORARIO.frecuencia_minutos IS 'Minutos entre salidas consecutivías' 
+COMMENT ON COLUMN HORARIO.frecuencia_minutos IS 'Minutos entre salidas consecutivas' 
 ;
 
 COMMENT ON COLUMN HORARIO.fecha_vigencia_desde IS 'NOT NULL' 
@@ -900,7 +900,7 @@ ALTER TABLE INCIDENTE_ELEMENTO_AFECTADO
     CHECK (tipo_afectacion IN ('Cambio de Ruta', 'Cancelación', 'Cierre de Estación', 'Cierre de Plataforma', 'Retiro de Tren', 'Retraso', 'Suspensión de Tramo')) 
 ;
 
-COMMENT ON TABLE INCIDENTE_ELEMENTO_AFECTADO IS 'Asociativía con Arco Exclusivo: elementos de la red afectados con integridad referencial (FK).'
+COMMENT ON TABLE INCIDENTE_ELEMENTO_AFECTADO IS 'Asociativa con Arco Exclusivo: elementos de la red afectados con integridad referencial (FK).'
 ;
 
 COMMENT ON COLUMN INCIDENTE_ELEMENTO_AFECTADO.id_incidente_elemento IS 'Identificador único' 
@@ -1015,7 +1015,7 @@ CREATE TABLE LINEA_ESTACION
     LOGGING 
 ;
 
-COMMENT ON TABLE LINEA_ESTACION IS 'Asociativía: secuencia de estaciones que recorre cada línea, con distancia y tiempo entre paradas consecutivías.'
+COMMENT ON TABLE LINEA_ESTACION IS 'Asociativa: secuencia de estaciones que recorre cada línea, con distancia y tiempo entre paradas consecutivas.'
 ;
 
 COMMENT ON COLUMN LINEA_ESTACION.id_linea_estacion IS 'Identificador único' 
@@ -1143,7 +1143,7 @@ CREATE TABLE ORDEN_REPUESTO
     LOGGING 
 ;
 
-COMMENT ON TABLE ORDEN_REPUESTO IS 'Asociativía: repuestos y cantidades utilizados en una orden de mantenimiento.'
+COMMENT ON TABLE ORDEN_REPUESTO IS 'Asociativa: repuestos y cantidades utilizados en una orden de mantenimiento.'
 ;
 
 COMMENT ON COLUMN ORDEN_REPUESTO.id_orden_repuesto IS 'Identificador único' 
@@ -1171,7 +1171,7 @@ CREATE TABLE ORDEN_TECNICO
     LOGGING 
 ;
 
-COMMENT ON TABLE ORDEN_TECNICO IS 'Asociativía: técnicos (empleados) asignados a una orden de mantenimiento.'
+COMMENT ON TABLE ORDEN_TECNICO IS 'Asociativa: técnicos (empleados) asignados a una orden de mantenimiento.'
 ;
 
 COMMENT ON COLUMN ORDEN_TECNICO.id_orden_tecnico IS 'Identificador único' 
@@ -1252,7 +1252,7 @@ CREATE TABLE PLATAFORMA
 
 ALTER TABLE PLATAFORMA 
     ADD CONSTRAINT CK_PLATAFORMA_ESTADO_OPERATIVO 
-    CHECK (estado_operativo IN ('Fuera de Servicio', 'Mantenimiento', 'Operativía')) 
+    CHECK (estado_operativo IN ('Fuera de Servicio', 'Mantenimiento', 'Operativa')) 
 ;
 
 COMMENT ON TABLE PLATAFORMA IS 'Plataforma física dentro de una estación.'
@@ -1270,7 +1270,7 @@ COMMENT ON COLUMN PLATAFORMA.identificador IS 'NOT NULL. p.ej. ''Plataforma 1'''
 COMMENT ON COLUMN PLATAFORMA.direccion_viaje IS 'p.ej. Norte, Sur' 
 ;
 
-COMMENT ON COLUMN PLATAFORMA.estado_operativo IS 'CHECK: Operativía, Mantenimiento, Fuera de Servicio' 
+COMMENT ON COLUMN PLATAFORMA.estado_operativo IS 'CHECK: Operativa, Mantenimiento, Fuera de Servicio' 
 ;
 
 ALTER TABLE PLATAFORMA 
@@ -1490,7 +1490,7 @@ ALTER TABLE TARIFA
     CHECK (estado IN ('Suspendida', 'Vencida', 'Vigente')) 
 ;
 
-COMMENT ON TABLE TARIFA IS 'Tarifa vigente por tipo de pasajero/producto; se conservía historial.'
+COMMENT ON TABLE TARIFA IS 'Tarifa vigente por tipo de pasajero/producto; se conserva historial.'
 ;
 
 COMMENT ON COLUMN TARIFA.id_tarifa IS 'Identificador único' 
@@ -1707,7 +1707,7 @@ ALTER TABLE TURNO
 
 ALTER TABLE TURNO 
     ADD CONSTRAINT CK_TURNO_ESTADO_ASISTENCIA 
-    CHECK (estado_asistencia IN ('Ausente', 'Permiso', 'Presente', 'Programado', 'Sustituido', 'Víacaciones')) 
+    CHECK (estado_asistencia IN ('Ausente', 'Permiso', 'Presente', 'Programado', 'Sustituido', 'Vacaciones')) 
 ;
 
 COMMENT ON TABLE TURNO IS 'Turno de trabajo programado para un empleado.'
@@ -1740,7 +1740,7 @@ COMMENT ON COLUMN TURNO.lugar_id IS 'Referencia polimórfica según tipo_lugar (
 COMMENT ON COLUMN TURNO.funcion IS 'Función que realizará' 
 ;
 
-COMMENT ON COLUMN TURNO.estado_asistencia IS 'CHECK: Programado, Presente, Ausente, Permiso, Víacaciones, Sustituido' 
+COMMENT ON COLUMN TURNO.estado_asistencia IS 'CHECK: Programado, Presente, Ausente, Permiso, Vacaciones, Sustituido' 
 ;
 
 ALTER TABLE TURNO 
@@ -1773,7 +1773,7 @@ ALTER TABLE VAGON
     CHECK (accesibilidad IN ('N', 'S')) 
 ;
 
-COMMENT ON TABLE VAGON IS 'Víagón individual; su pertenencia a un tren se conservía como historial en TREN_VAGON.'
+COMMENT ON TABLE VAGON IS 'Vagón individual; su pertenencia a un tren se conserva como historial en TREN_VAGON.'
 ;
 
 COMMENT ON COLUMN VAGON.id_vagon IS 'Identificador único' 

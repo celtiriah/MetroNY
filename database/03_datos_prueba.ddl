@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- Sistema de Gestión del Metro de Nuevía York
+-- Sistema de Gestión del Metro de Nueva York
 -- Script 03: Inserción de Datos de Prueba Iniciales (Seed Data)
 -- Cobertura: 33 tablas del modelo relacional 3FN
 --
@@ -23,7 +23,7 @@ ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD';
 ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS';
 
 PROMPT ====================================================================
-PROMPT Insertando datos iniciales del Metro de Nuevía York...
+PROMPT Insertando datos iniciales del Metro de Nueva York...
 PROMPT ====================================================================
 
 -- 1. MODELO_TREN
@@ -55,25 +55,25 @@ INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (1, 'R
 INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (2, 'REP-SHOE-02', 'Zapata de Contacto Tercer Riel (Third Rail Shoe)', 380.00);
 INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (3, 'REP-DOR-03', 'Actuador Neumático de Puerta Automática', 520.00);
 INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (4, 'REP-OPT-04', 'Sensor Óptico CBTC de Señalización', 890.00);
-INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (5, 'REP-AIR-05', 'Filtro de Aire HVAC de Víagón Pasajero', 65.00);
+INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (5, 'REP-AIR-05', 'Filtro de Aire HVAC de Vagón Pasajero', 65.00);
 INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (6, 'REP-LED-06', 'Módulo de Iluminación LED Cabina/Salón', 115.00);
-INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (7, 'REP-REL-07', 'Relé de Seguridad Enclavíamiento de Vía', 340.00);
+INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (7, 'REP-REL-07', 'Relé de Seguridad Enclavamiento de Vía', 340.00);
 INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario) VALUES (8, 'REP-ESC-08', 'Cadena de Tracción Escalera Eléctrica', 1250.00);
 
 -- 5. ESTACION
 PROMPT 5/33. Insertando ESTACION...
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (1, 'TSQ42', 'Times Sq - 42 St', 'Broadway & 42nd St', 'Manhattan', 40.7559, -73.9871, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 14, 4, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (2, 'GCT42', 'Grand Central - 42 St', 'Park Ave & 42nd St', 'Manhattan', 40.7517, -73.9768, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 12, 4, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (3, '14USQ', '14 St - Union Sq', 'Broadway & 14th St', 'Manhattan', 40.7359, -73.9906, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 10, 4, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (4, 'W4ST', 'W 4 St - Washington Sq', '6th Ave & W 4th St', 'Manhattan', 40.7310, -74.0003, TO_DATE('1932-09-10', 'YYYY-MM-DD'), 8, 4, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (5, 'FLTN', 'Fulton St', 'Fulton St & Broadway', 'Manhattan', 40.7103, -74.0076, TO_DATE('1905-01-16', 'YYYY-MM-DD'), 16, 6, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (6, 'BCH', 'Brooklyn Bridge - City Hall', 'Centre St & Chambers St', 'Manhattan', 40.7130, -74.0041, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 6, 2, 'Operativía', '24 horas', 'S', 'N', 'S', 'Terminal');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (7, 'ATL', 'Atlantic Av - Barclays Ctr', 'Flatbush Ave & Atlantic Ave', 'Brooklyn', 40.6844, -73.9786, TO_DATE('1908-05-01', 'YYYY-MM-DD'), 11, 6, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (8, 'JAY', 'Jay St - MetroTech', 'Jay St & Willoughby St', 'Brooklyn', 40.6923, -73.9873, TO_DATE('1933-02-01', 'YYYY-MM-DD'), 7, 3, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (9, 'QBORO', 'Queensboro Plaza', 'Queens Plaza & 27th St', 'Queens', 40.7506, -73.9402, TO_DATE('1916-11-05', 'YYYY-MM-DD'), 5, 2, 'Operativía', '24 horas', 'S', 'S', 'S', 'Transferencia');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (10, 'FLSH', 'Flushing - Main St', 'Main St & Roosevelt Ave', 'Queens', 40.7596, -73.8300, TO_DATE('1928-01-21', 'YYYY-MM-DD'), 8, 2, 'Operativía', '24 horas', 'S', 'S', 'S', 'Terminal');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (11, 'CONEY', 'Coney Island - Stillwell Av', 'Surf Ave & Stillwell Ave', 'Brooklyn', 40.5771, -73.9812, TO_DATE('1919-05-30', 'YYYY-MM-DD'), 6, 8, 'Operativía', '24 horas', 'S', 'N', 'S', 'Terminal');
-INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevíadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (12, 'VDCRT', 'Vían Cortlandt Park - 242 St', 'Broadway & 242nd St', 'The Bronx', 40.8892, -73.8986, TO_DATE('1908-08-01', 'YYYY-MM-DD'), 4, 2, 'Operativía', '24 horas', 'N', 'N', 'N', 'Terminal');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (1, 'TSQ42', 'Times Sq - 42 St', 'Broadway & 42nd St', 'Manhattan', 40.7559, -73.9871, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 14, 4, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (2, 'GCT42', 'Grand Central - 42 St', 'Park Ave & 42nd St', 'Manhattan', 40.7517, -73.9768, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 12, 4, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (3, '14USQ', '14 St - Union Sq', 'Broadway & 14th St', 'Manhattan', 40.7359, -73.9906, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 10, 4, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (4, 'W4ST', 'W 4 St - Washington Sq', '6th Ave & W 4th St', 'Manhattan', 40.7310, -74.0003, TO_DATE('1932-09-10', 'YYYY-MM-DD'), 8, 4, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (5, 'FLTN', 'Fulton St', 'Fulton St & Broadway', 'Manhattan', 40.7103, -74.0076, TO_DATE('1905-01-16', 'YYYY-MM-DD'), 16, 6, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (6, 'BCH', 'Brooklyn Bridge - City Hall', 'Centre St & Chambers St', 'Manhattan', 40.7130, -74.0041, TO_DATE('1904-10-27', 'YYYY-MM-DD'), 6, 2, 'Operativa', '24 horas', 'S', 'N', 'S', 'Terminal');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (7, 'ATL', 'Atlantic Av - Barclays Ctr', 'Flatbush Ave & Atlantic Ave', 'Brooklyn', 40.6844, -73.9786, TO_DATE('1908-05-01', 'YYYY-MM-DD'), 11, 6, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (8, 'JAY', 'Jay St - MetroTech', 'Jay St & Willoughby St', 'Brooklyn', 40.6923, -73.9873, TO_DATE('1933-02-01', 'YYYY-MM-DD'), 7, 3, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (9, 'QBORO', 'Queensboro Plaza', 'Queens Plaza & 27th St', 'Queens', 40.7506, -73.9402, TO_DATE('1916-11-05', 'YYYY-MM-DD'), 5, 2, 'Operativa', '24 horas', 'S', 'S', 'S', 'Transferencia');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (10, 'FLSH', 'Flushing - Main St', 'Main St & Roosevelt Ave', 'Queens', 40.7596, -73.8300, TO_DATE('1928-01-21', 'YYYY-MM-DD'), 8, 2, 'Operativa', '24 horas', 'S', 'S', 'S', 'Terminal');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (11, 'CONEY', 'Coney Island - Stillwell Av', 'Surf Ave & Stillwell Ave', 'Brooklyn', 40.5771, -73.9812, TO_DATE('1919-05-30', 'YYYY-MM-DD'), 6, 8, 'Operativa', '24 horas', 'S', 'N', 'S', 'Terminal');
+INSERT INTO ESTACION (id_estacion, codigo, nombre, direccion, distrito, latitud, longitud, fecha_inauguracion, cantidad_accesos, cantidad_plataformas, estado_operativo, horario_funcionamiento, elevadores_disponibles, escaleras_electricas_disponibles, accesible_discapacidad, tipo_estacion) VALUES (12, 'VDCRT', 'Van Cortlandt Park - 242 St', 'Broadway & 242nd St', 'The Bronx', 40.8892, -73.8986, TO_DATE('1908-08-01', 'YYYY-MM-DD'), 4, 2, 'Operativa', '24 horas', 'N', 'N', 'N', 'Terminal');
 
 -- 6. HORARIO_ESTACION
 PROMPT 6/33. Insertando HORARIO_ESTACION...
@@ -92,19 +92,19 @@ INSERT INTO HORARIO_ESTACION (id_horario_estacion, estacion_id, tipo_dia, hora_a
 
 -- 7. PLATAFORMA
 PROMPT 7/33. Insertando PLATAFORMA...
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (1, 1, 'Plat 1-N', 'Uptown / The Bronx', 1500, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (2, 1, 'Plat 1-S', 'Downtown / Brooklyn', 1500, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (3, 1, 'Plat 7-E', 'Flushing - Queens', 1200, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (4, 2, 'Plat 4/5/6-N', 'Uptown / The Bronx', 1400, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (5, 2, 'Plat 4/5/6-S', 'Downtown / Brooklyn', 1400, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (6, 3, 'Plat L-E', 'Brooklyn / Canarsie', 1100, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (7, 3, 'Plat L-W', '8th Ave Manhattan', 1100, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (8, 4, 'Plat A/C-N', 'Uptown / Washington Hts', 1300, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (9, 4, 'Plat A/C-S', 'Downtown / Brooklyn', 1300, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (10, 5, 'Plat A/C-N', 'Uptown / Manhattan', 1500, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (11, 5, 'Plat A/C-S', 'Brooklyn', 1500, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (12, 7, 'Plat B/Q-N', 'Manhattan Express', 1400, 'Operativía');
-INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (13, 7, 'Plat B/Q-S', 'Brighton / Coney Island', 1400, 'Operativía');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (1, 1, 'Plat 1-N', 'Uptown / The Bronx', 1500, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (2, 1, 'Plat 1-S', 'Downtown / Brooklyn', 1500, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (3, 1, 'Plat 7-E', 'Flushing - Queens', 1200, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (4, 2, 'Plat 4/5/6-N', 'Uptown / The Bronx', 1400, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (5, 2, 'Plat 4/5/6-S', 'Downtown / Brooklyn', 1400, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (6, 3, 'Plat L-E', 'Brooklyn / Canarsie', 1100, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (7, 3, 'Plat L-W', '8th Ave Manhattan', 1100, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (8, 4, 'Plat A/C-N', 'Uptown / Washington Hts', 1300, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (9, 4, 'Plat A/C-S', 'Downtown / Brooklyn', 1300, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (10, 5, 'Plat A/C-N', 'Uptown / Manhattan', 1500, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (11, 5, 'Plat A/C-S', 'Brooklyn', 1500, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (12, 7, 'Plat B/Q-N', 'Manhattan Express', 1400, 'Operativa');
+INSERT INTO PLATAFORMA (id_plataforma, estacion_id, identificador, direccion_viaje, capacidad_aproximada, estado_operativo) VALUES (13, 7, 'Plat B/Q-S', 'Brighton / Coney Island', 1400, 'Operativa');
 
 -- 8. ESTACION_SERVICIO
 PROMPT 8/33. Insertando ESTACION_SERVICIO...
@@ -175,7 +175,7 @@ INSERT INTO RUTA_DETALLE (id_ruta_detalle, ruta_id, estacion_id, orden_llegada, 
 -- 14. HORARIO
 PROMPT 14/33. Insertando HORARIO...
 INSERT INTO HORARIO (id_horario, ruta_id, dia_semana, hora_inicio, hora_fin, frecuencia_minutos, tipo_servicio, fecha_vigencia_desde, fecha_vigencia_hasta) VALUES (1, 1, 'Lunes a Viernes', TO_DATE('06:00', 'HH24:MI'), TO_DATE('09:30', 'HH24:MI'), 4, 'Hora Pico Matutina', TO_DATE('2024-01-01', 'YYYY-MM-DD'), NULL);
-INSERT INTO HORARIO (id_horario, ruta_id, dia_semana, hora_inicio, hora_fin, frecuencia_minutos, tipo_servicio, fecha_vigencia_desde, fecha_vigencia_hasta) VALUES (2, 1, 'Lunes a Viernes', TO_DATE('09:31', 'HH24:MI'), TO_DATE('16:00', 'HH24:MI'), 7, 'Víalle / Regular', TO_DATE('2024-01-01', 'YYYY-MM-DD'), NULL);
+INSERT INTO HORARIO (id_horario, ruta_id, dia_semana, hora_inicio, hora_fin, frecuencia_minutos, tipo_servicio, fecha_vigencia_desde, fecha_vigencia_hasta) VALUES (2, 1, 'Lunes a Viernes', TO_DATE('09:31', 'HH24:MI'), TO_DATE('16:00', 'HH24:MI'), 7, 'Valle / Regular', TO_DATE('2024-01-01', 'YYYY-MM-DD'), NULL);
 INSERT INTO HORARIO (id_horario, ruta_id, dia_semana, hora_inicio, hora_fin, frecuencia_minutos, tipo_servicio, fecha_vigencia_desde, fecha_vigencia_hasta) VALUES (3, 3, 'Lunes a Viernes', TO_DATE('07:00', 'HH24:MI'), TO_DATE('10:00', 'HH24:MI'), 5, 'Expreso Matutino', TO_DATE('2024-01-01', 'YYYY-MM-DD'), NULL);
 INSERT INTO HORARIO (id_horario, ruta_id, dia_semana, hora_inicio, hora_fin, frecuencia_minutos, tipo_servicio, fecha_vigencia_desde, fecha_vigencia_hasta) VALUES (4, 4, 'Lunes a Viernes', TO_DATE('06:30', 'HH24:MI'), TO_DATE('09:30', 'HH24:MI'), 3, 'Hora Pico', TO_DATE('2024-01-01', 'YYYY-MM-DD'), NULL);
 
@@ -190,27 +190,27 @@ INSERT INTO TREN (id_tren, codigo_interno, modelo_id, anio_fabricacion, capacida
 
 -- 16. VAGON
 PROMPT 16/33. Insertando VAGON...
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (1, 'VG-1001', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (2, 'VG-1002', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (3, 'VG-1003', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (4, 'VG-1004', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (5, 'VG-1005', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (6, 'VG-1006', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (7, 'VG-1007', 'Pasajero Regular', 44, 110, 2020, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (8, 'VG-1008', 'Pasajero Regular', 44, 110, 2020, 'En Uso', 'S');
-INSERT INTO VAGON (id_víagon, numero_serie, tipo_víagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (9, 'VG-1009', 'Pasajero Regular', 44, 110, 2020, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (1, 'VG-1001', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (2, 'VG-1002', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (3, 'VG-1003', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (4, 'VG-1004', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (5, 'VG-1005', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (6, 'VG-1006', 'Pasajero Regular', 44, 110, 2019, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (7, 'VG-1007', 'Pasajero Regular', 44, 110, 2020, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (8, 'VG-1008', 'Pasajero Regular', 44, 110, 2020, 'En Uso', 'S');
+INSERT INTO VAGON (id_vagon, numero_serie, tipo_vagon, capacidad_sentados, capacidad_de_pie, anio_fabricacion, estado, accesibilidad) VALUES (9, 'VG-1009', 'Pasajero Regular', 44, 110, 2020, 'En Uso', 'S');
 
 -- 17. TREN_VAGON
 PROMPT 17/33. Insertando TREN_VAGON...
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (1, 1, 1, 1, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (2, 1, 2, 2, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (3, 1, 3, 3, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (4, 2, 4, 1, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (5, 2, 5, 2, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (6, 2, 6, 3, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (7, 3, 7, 1, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (8, 3, 8, 2, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
-INSERT INTO TREN_VAGON (id_tren_víagon, tren_id, víagon_id, posicion, fecha_inicio) VALUES (9, 3, 9, 3, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (1, 1, 1, 1, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (2, 1, 2, 2, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (3, 1, 3, 3, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (4, 2, 4, 1, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (5, 2, 5, 2, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (6, 2, 6, 3, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (7, 3, 7, 1, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (8, 3, 8, 2, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
+INSERT INTO TREN_VAGON (id_tren_vagon, tren_id, vagon_id, posicion, fecha_inicio) VALUES (9, 3, 9, 3, TO_DATE('2026-01-01', 'YYYY-MM-DD'));
 
 -- 18. EMPLEADO
 PROMPT 18/33. Insertando EMPLEADO...
@@ -280,8 +280,8 @@ INSERT INTO RECARGA (id_recarga, numero_transaccion, tarjeta_id, fecha_hora, mon
 PROMPT 25/33. Insertando EQUIPO...
 INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (1, 'EQ-TRK-101', 'Vía', 'ESTACION', 1, 'Vía 1 Norte - Times Sq', 'Bethlehem Steel', '115RE Rail', 'Disponible', TO_DATE('2020-04-10', 'YYYY-MM-DD'));
 INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (2, 'EQ-SIG-202', 'Señal', 'ESTACION', 1, 'Interlocking 42nd St', 'Siemens', 'Trainguard MT', 'Disponible', TO_DATE('2021-08-15', 'YYYY-MM-DD'));
-INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (3, 'EQ-ELV-301', 'Elevíador', 'ESTACION', 2, 'Acceso Principal 42 St / Lexington', 'Otis', 'Gen2 Premier', 'Disponible', TO_DATE('2019-11-20', 'YYYY-MM-DD'));
-INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (4, 'EQ-ESC-401', 'Escalera Eléctrica', 'ESTACION', 5, 'Mezzanine Fulton Center Sur', 'Schindler', '9300 Advíanced', 'En Mantenimiento', TO_DATE('2018-06-12', 'YYYY-MM-DD'));
+INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (3, 'EQ-ELV-301', 'Elevador', 'ESTACION', 2, 'Acceso Principal 42 St / Lexington', 'Otis', 'Gen2 Premier', 'Disponible', TO_DATE('2019-11-20', 'YYYY-MM-DD'));
+INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (4, 'EQ-ESC-401', 'Escalera Eléctrica', 'ESTACION', 5, 'Mezzanine Fulton Center Sur', 'Schindler', '9300 Advanced', 'En Mantenimiento', TO_DATE('2018-06-12', 'YYYY-MM-DD'));
 INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (5, 'EQ-TRN-101', 'Tren', 'TREN', 1, 'Rame TR-101 Línea 1', 'Bombardier', 'R142', 'Disponible', TO_DATE('2018-05-15', 'YYYY-MM-DD'));
 INSERT INTO EQUIPO (id_equipo, codigo_equipo, tipo_equipo, tipo_referencia, referencia_id, ubicacion, fabricante, modelo, estado, fecha_instalacion) VALUES (6, 'EQ-TRN-301', 'Tren', 'TREN', 5, 'Rame TR-301 Corona Yard', 'Bombardier', 'R179', 'En Mantenimiento', TO_DATE('2021-02-10', 'YYYY-MM-DD'));
 
@@ -341,47 +341,47 @@ PROMPT ====================================================================
 PROMPT Sincronizando secuencias para evitar colisiones en futuros inserts...
 PROMPT ====================================================================
 DECLARE
-    v_víal NUMBER;
-    PROCEDURE avíanzar_secuencia(p_seq VARCHAR2, p_veces NUMBER) IS
+    v_val NUMBER;
+    PROCEDURE avanzar_secuencia(p_seq VARCHAR2, p_veces NUMBER) IS
     BEGIN
         FOR i IN 1..p_veces LOOP
-            EXECUTE IMMEDIATE 'SELECT ' || p_seq || '.NEXTVAL FROM DUAL' INTO v_víal;
+            EXECUTE IMMEDIATE 'SELECT ' || p_seq || '.NEXTVAL FROM DUAL' INTO v_val;
         END LOOP;
     EXCEPTION WHEN OTHERS THEN NULL;
     END;
 BEGIN
-    avíanzar_secuencia('SEQ_LINEA', 10);
-    avíanzar_secuencia('SEQ_ESTACION', 20);
-    avíanzar_secuencia('SEQ_HORARIO_ESTACION', 20);
-    avíanzar_secuencia('SEQ_PLATAFORMA', 20);
-    avíanzar_secuencia('SEQ_ESTACION_SERVICIO', 20);
-    avíanzar_secuencia('SEQ_TRANSFERENCIA', 10);
-    avíanzar_secuencia('SEQ_RUTA', 10);
-    avíanzar_secuencia('SEQ_RUTA_DETALLE', 20);
-    avíanzar_secuencia('SEQ_HORARIO', 10);
-    avíanzar_secuencia('SEQ_MODELO_TREN', 10);
-    avíanzar_secuencia('SEQ_DEPOSITO', 10);
-    avíanzar_secuencia('SEQ_TREN', 15);
-    avíanzar_secuencia('SEQ_VAGON', 30);
-    avíanzar_secuencia('SEQ_TREN_VAGON', 20);
-    avíanzar_secuencia('SEQ_EMPLEADO', 20);
-    avíanzar_secuencia('SEQ_CERTIFICACION', 10);
-    avíanzar_secuencia('SEQ_CERTIFICACION_MODELO', 10);
-    avíanzar_secuencia('SEQ_TURNO', 10);
-    avíanzar_secuencia('SEQ_PASAJERO', 20);
-    avíanzar_secuencia('SEQ_TARJETA', 20);
-    avíanzar_secuencia('SEQ_RECARGA', 10);
-    avíanzar_secuencia('SEQ_TARIFA', 10);
-    avíanzar_secuencia('SEQ_VIAJE_PROGRAMADO', 20);
-    avíanzar_secuencia('SEQ_VIAJE_PASAJERO', 20);
-    avíanzar_secuencia('SEQ_EQUIPO', 15);
-    avíanzar_secuencia('SEQ_ORDEN_MANTENIMIENTO', 10);
-    avíanzar_secuencia('SEQ_ORDEN_TECNICO', 10);
-    avíanzar_secuencia('SEQ_REPUESTO', 20);
-    avíanzar_secuencia('SEQ_ORDEN_REPUESTO', 10);
-    avíanzar_secuencia('SEQ_INCIDENTE', 10);
-    avíanzar_secuencia('SEQ_INCIDENTE_ELEMENTO_AF_F066', 10);
-    avíanzar_secuencia('SEQ_BITACORA', 10);
+    avanzar_secuencia('SEQ_LINEA', 10);
+    avanzar_secuencia('SEQ_ESTACION', 20);
+    avanzar_secuencia('SEQ_HORARIO_ESTACION', 20);
+    avanzar_secuencia('SEQ_PLATAFORMA', 20);
+    avanzar_secuencia('SEQ_ESTACION_SERVICIO', 20);
+    avanzar_secuencia('SEQ_TRANSFERENCIA', 10);
+    avanzar_secuencia('SEQ_RUTA', 10);
+    avanzar_secuencia('SEQ_RUTA_DETALLE', 20);
+    avanzar_secuencia('SEQ_HORARIO', 10);
+    avanzar_secuencia('SEQ_MODELO_TREN', 10);
+    avanzar_secuencia('SEQ_DEPOSITO', 10);
+    avanzar_secuencia('SEQ_TREN', 15);
+    avanzar_secuencia('SEQ_VAGON', 30);
+    avanzar_secuencia('SEQ_TREN_VAGON', 20);
+    avanzar_secuencia('SEQ_EMPLEADO', 20);
+    avanzar_secuencia('SEQ_CERTIFICACION', 10);
+    avanzar_secuencia('SEQ_CERTIFICACION_MODELO', 10);
+    avanzar_secuencia('SEQ_TURNO', 10);
+    avanzar_secuencia('SEQ_PASAJERO', 20);
+    avanzar_secuencia('SEQ_TARJETA', 20);
+    avanzar_secuencia('SEQ_RECARGA', 10);
+    avanzar_secuencia('SEQ_TARIFA', 10);
+    avanzar_secuencia('SEQ_VIAJE_PROGRAMADO', 20);
+    avanzar_secuencia('SEQ_VIAJE_PASAJERO', 20);
+    avanzar_secuencia('SEQ_EQUIPO', 15);
+    avanzar_secuencia('SEQ_ORDEN_MANTENIMIENTO', 10);
+    avanzar_secuencia('SEQ_ORDEN_TECNICO', 10);
+    avanzar_secuencia('SEQ_REPUESTO', 20);
+    avanzar_secuencia('SEQ_ORDEN_REPUESTO', 10);
+    avanzar_secuencia('SEQ_INCIDENTE', 10);
+    avanzar_secuencia('SEQ_INCIDENTE_ELEMENTO_AF_F066', 10);
+    avanzar_secuencia('SEQ_BITACORA', 10);
 END;
 /
 

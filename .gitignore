@@ -38,3 +38,4 @@ desktop.ini
 # Mantener configuración compartida de VS Code (.vscode/settings.json)
 .vscode/*
 !.vscode/settings.json
+

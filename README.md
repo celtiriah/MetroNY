@@ -32,46 +32,56 @@ Cualquier integrante del grupo puede clonar este repositorio y tener la base de 
 
 ---
 
-### Opción 1: Instalación Automática en 1 Clic (Recomendada en Windows)
+### Opción 1: Instalación Automática (Recomendada)
 
-Simplemente haz doble clic sobre el archivo:
-```text
-setup.bat
-```
-El script creará automáticamente los tablespaces, el usuario, las 33 tablas, insertará los 208 datos de prueba y compilará los 63 índices B-Tree sin necesidad de escribir ningún comando.
+El sistema cuenta con **auto-detección de Pluggable Database** (`FREEPDB1` para Oracle 23ai/26ai Free o `XEPDB1` para Oracle XE).
+
+* **En Windows**:
+  Haz doble clic sobre:
+  ```text
+  setup.bat
+  ```
+* **En Linux / macOS / WSL**:
+  Otorga permisos y ejecuta:
+  ```bash
+  chmod +x setup.sh
+  ./setup.sh
+  ```
+
+El script detectará tu PDB activo, creará los tablespaces, el usuario `METRO_NY`, las 33 tablas, insertará los 208 datos de prueba y compilará los 63 índices B-Tree en segundos.
 
 ---
 
 ### Opción 2: Instalación Manual por Comandos
 
-Si prefieres ejecutar los scripts individualmente en tu terminal (PowerShell o CMD):
+Si prefieres ejecutar los scripts individualmente (reemplaza `FREEPDB1` por tu PDB si usas XE como `XEPDB1`):
 
 ```powershell
 # 1. Crear tablespaces limpios y usuario METRO_NY (como SYSDBA):
-sqlplus / as sysdba @01_configuracion_usuario.ddl
+sqlplus / as sysdba @database\01_configuracion_usuario.ddl
 
 # 2. Crear las 33 tablas normalizadas, llaves foráneas y secuencias:
-sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @02_ddl_tablas.ddl
+sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\02_ddl_tablas.ddl
 
 # 3. Insertar los 208 registros de datos de prueba del Metro de NY:
-sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @03_datos_prueba.ddl
+sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\03_datos_prueba.ddl
 
 # 4. Construir los 63 índices B-Tree de rendimiento en TS_METRO_IDX:
-sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @04_indices.ddl
+sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\04_indices.ddl
 ```
 
 ---
 
 ## 📊 Credenciales y Conexión
 
-Para conectarte desde **VS Code** (usando la extensión *Oracle SQL Developer*) o cualquier herramienta gráfica:
+Para conectarte desde **VS Code** (usando la extensión *Oracle SQL Developer*) o cualquier cliente (DBeaver, SQL Developer):
 
 | Parámetro | Valor |
 | :--- | :--- |
 | **Host / Servidor** | `localhost` (o `127.0.0.1`) |
 | **Puerto** | `1521` |
 | **Tipo de Conexión** | `Service Name` |
-| **Service Name** | `FREEPDB1` |
+| **Service Name** | Tu PDB activo (`FREEPDB1` o `XEPDB1`) |
 | **Usuario** | `METRO_NY` |
 | **Contraseña** | `MetroPass123` |
 
@@ -79,13 +89,13 @@ Para conectarte desde **VS Code** (usando la extensión *Oracle SQL Developer*) 
 
 ## 🔍 Consultas Mínimas Obligatorias
 
-El archivo `consultas_minimas.ddl` contiene la resolución completa y documentada de las **15 consultas mínimas exigidas en el enunciado del proyecto**.
+El archivo `database/consultas_minimas.ddl` contiene la resolución completa y documentada de las **15 consultas mínimas exigidas en el enunciado del proyecto**.
 
 Puedes ejecutarlas en bloque o una por una:
 ```powershell
-sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @consultas_minimas.ddl
+sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\consultas_minimas.ddl
 ```
-O abrir `consultas_minimas.ddl` en **VS Code**, colocar el cursor sobre cualquier consulta y presionar `Ctrl + Enter`.
+O abrir `database/consultas_minimas.ddl` en **VS Code**, colocar el cursor sobre cualquier consulta y presionar `Ctrl + Enter`.
 
 ---
 
@@ -94,16 +104,20 @@ O abrir `consultas_minimas.ddl` en **VS Code**, colocar el cursor sobre cualquie
 ```text
 MetroNY/
 ├── .vscode/
-│   └── settings.json           # Asociación automática de archivos .ddl con PL/SQL
+│   └── settings.json           # Asociación de archivos .ddl con sintaxis PL/SQL
 ├── docs/
-│   ├── Enunciado...md          # Especificación oficial de requerimientos del proyecto
-│   └── legacy/                 # Archivos históricos y versiones intermedias
-├── 01_configuracion_usuario.ddl # Tablespaces dedicados y creación de usuario
-├── 02_ddl_tablas.ddl           # DDL maestro (33 tablas en 3FN, 50 FKs, secuencias)
-├── 03_datos_prueba.ddl         # Carga de datos reales (208 inserts y sincronización)
-├── 04_indices.ddl              # 63 Índices B-Tree optimizados en TS_METRO_IDX
-├── consultas_minimas.ddl       # Las 15 consultas del proyecto con encabezados limpios
-├── setup.bat                   # Instalador en 1 clic para Windows
-├── .gitignore                  # Exclusión de archivos binarios (.dbf), logs y temporales
+│   ├── Enunciado...md          # Especificación oficial de requerimientos
+│   └── legacy/                 # Documentos históricos
+├── database/                   # Scripts de base de datos Oracle (.ddl)
+│   ├── 01_configuracion_usuario.ddl # Tablespaces dedicados y usuario METRO_NY
+│   ├── 02_ddl_tablas.ddl           # DDL maestro (33 tablas en 3FN, 50 FKs, secuencias)
+│   ├── 03_datos_prueba.ddl         # Carga de datos reales (208 inserts y sincronización)
+│   ├── 04_indices.ddl              # 63 Índices B-Tree optimizados en TS_METRO_IDX
+│   ├── consultas_minimas.ddl       # Las 15 consultas mínimas resueltas y formateadas
+│   └── get_pdb.sql                 # Script auxiliar para auto-detección del PDB
+├── setup.bat                   # Instalador automático en 1 clic para Windows
+├── setup.sh                    # Instalador automático para Linux / macOS / WSL
+├── .gitignore                  # Exclusión de binarios (.dbf), logs y temporales
 └── README.md                   # Documentación principal del repositorio
 ```
+
