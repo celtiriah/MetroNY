@@ -39,13 +39,13 @@ El sistema cuenta con **auto-detección de Pluggable Database** (`FREEPDB1` para
 * **En Windows**:
   Haz doble clic sobre:
   ```text
-  setup.bat
+  dbsetup.bat
   ```
 * **En Linux / macOS / WSL**:
   Otorga permisos y ejecuta:
   ```bash
-  chmod +x setup.sh
-  ./setup.sh
+  chmod +x dbsetup.sh
+  ./dbsetup.sh
   ```
 
 El script detectará tu PDB activo, creará los tablespaces, el usuario `METRO_NY`, las 33 tablas, insertará los 208 datos de prueba y compilará los 63 índices B-Tree en segundos.
@@ -72,6 +72,29 @@ sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\04_indices.ddl
 
 ---
 
+## 💻 Prototipo Web Interactivo (Dashboard & 15 Consultas)
+
+El proyecto incluye un prototipo web moderno con diseño oficial del Metro de Nueva York (MTA NYCT):
+* **Frontend**: HTML5 + CSS3 (Modo Oscuro) + JavaScript Vanilla (sin frameworks ni compilación).
+* **Backend**: Mini-servidor en Python con Flask y el driver oficial `oracledb`.
+
+### ¿Cómo ejecutar la aplicación web?
+
+* **En Windows (1 Clic)**:
+  Haz doble clic en:
+  ```text
+  start.bat
+  ```
+  *(Instala dependencias si faltan, inicia el mini-servidor y abre automáticamente tu navegador en `http://localhost:5000`)*.
+
+* **En Linux / macOS / WSL**:
+  ```bash
+  chmod +x start.sh
+  ./start.sh
+  ```
+
+---
+
 ## 📊 Credenciales y Conexión
 
 Para conectarte desde **VS Code** (usando la extensión *Oracle SQL Developer*) o cualquier cliente (DBeaver, SQL Developer):
@@ -91,7 +114,7 @@ Para conectarte desde **VS Code** (usando la extensión *Oracle SQL Developer*) 
 
 El archivo `database/consultas_minimas.ddl` contiene la resolución completa y documentada de las **15 consultas mínimas exigidas en el enunciado del proyecto**.
 
-Puedes ejecutarlas en bloque o una por una:
+Puedes ejecutarlas desde el **Dashboard Web** (pestaña *"15 Consultas Mínimas"*) o por terminal:
 ```powershell
 sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\consultas_minimas.ddl
 ```
@@ -115,8 +138,18 @@ MetroNY/
 │   ├── 04_indices.ddl              # 63 Índices B-Tree optimizados en TS_METRO_IDX
 │   ├── consultas_minimas.ddl       # Las 15 consultas mínimas resueltas y formateadas
 │   └── get_pdb.sql                 # Script auxiliar para auto-detección del PDB
-├── setup.bat                   # Instalador automático en 1 clic para Windows
-├── setup.sh                    # Instalador automático para Linux / macOS / WSL
+├── backend/                    # Mini-servidor API REST en Python
+│   ├── app.py                  # Rutas Flask y servicio de archivos estáticos
+│   ├── db.py                   # Conexión portable a Oracle y catálogo de consultas
+│   └── requirements.txt        # Dependencias (flask, oracledb)
+├── frontend/                   # Interfaz de usuario web
+│   ├── index.html              # Dashboard con pestañas y tablas
+│   ├── style.css               # Estilos oscuros inspirados en MTA NYCT
+│   └── app.js                  # Lógica de consumo de API y tablas interactivas
+├── dbsetup.bat                 # Instalador de la base de datos en 1 clic para Windows
+├── dbsetup.sh                  # Instalador de la base de datos para Linux / macOS
+├── start.bat                   # Inicia el backend y abre el navegador (Windows)
+├── start.sh                    # Inicia el backend y abre el navegador (Linux)
 ├── .gitignore                  # Exclusión de binarios (.dbf), logs y temporales
 └── README.md                   # Documentación principal del repositorio
 ```

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTA NYCT - Sistema de Gestión del Metro de Nueva York</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- ENCABEZADO PRINCIPAL -->
+  <header class="mta-header">
+    <div class="header-container">
+      <div class="logo-area">
+        <div class="bullets-group">
+          <span class="mta-bullet bullet-red">1</span>
+          <span class="mta-bullet bullet-blue">A</span>
+          <span class="mta-bullet bullet-blue">C</span>
+          <span class="mta-bullet bullet-purple">7</span>
+          <span class="mta-bullet bullet-grey">L</span>
+        </div>
+        <div class="title-group">
+          <h1>MTA New York City Subway</h1>
+          <p class="subtitle">Sistema Integral de Gestión & Operaciones (Base de Datos Oracle)</p>
+        </div>
+      </div>
+      <div id="connection-badge" class="connection-badge badge-loading">
+        <span class="status-dot"></span>
+        <span id="connection-text">Conectando a Oracle...</span>
+      </div>
+    </div>
+
+    <!-- PESTAÑAS DE NAVEGACIÓN -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Panel General
+      </button>
+      <button class="tab-btn" data-tab="tab-lineas">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        Líneas y Flota
+      </button>
+      <button class="tab-btn" data-tab="tab-estaciones">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Estaciones
+      </button>
+      <button class="tab-btn" data-tab="tab-consultas">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        15 Consultas Mínimas
+      </button>
+    </nav>
+  </header>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main class="main-content">
+    <!-- SECCIÓN 1: DASHBOARD -->
+    <section id="tab-dashboard" class="tab-content active">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-icon bg-blue">🚇</div>
+          <div class="metric-info">
+            <span class="metric-label">Líneas Activas</span>
+            <span class="metric-value" id="val-lineas">-</span>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon bg-green">🚉</div>
+          <div class="metric-info">
+            <span class="metric-label">Estaciones de Red</span>
+            <span class="metric-value" id="val-estaciones">-</span>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon bg-purple">🚆</div>
+          <div class="metric-info">
+            <span class="metric-label">Trenes en Flota</span>
+            <span class="metric-value" id="val-trenes">-</span>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon bg-yellow">👷</div>
+          <div class="metric-info">
+            <span class="metric-label">Personal MTA</span>
+            <span class="metric-value" id="val-empleados">-</span>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon bg-cyan">💳</div>
+          <div class="metric-info">
+            <span class="metric-label">Tarjetas OMNY</span>
+            <span class="metric-value" id="val-tarjetas">-</span>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon bg-red">⚠️</div>
+          <div class="metric-info">
+            <span class="metric-label">Incidentes Abiertos</span>
+            <span class="metric-value" id="val-incidentes">-</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-banner">
+        <h3>Bienvenido al Sistema de Gestión del Metro de Nueva York</h3>
+        <p>Este prototipo está conectado en tiempo real al motor de base de datos <strong>Oracle Database</strong> mediante un backend ligero en Python. Los datos son consultados de forma dinámica desde las tablas del esquema <code>METRO_NY</code>.</p>
+      </div>
+
+      <h2 class="section-title">Red de Transporte: Vista Rápida de Líneas</h2>
+      <div id="dashboard-lines-grid" class="lines-grid">
+        <!-- Generado dinámicamente -->
+      </div>
+    </section>
+
+    <!-- SECCIÓN 2: LÍNEAS -->
+    <section id="tab-lineas" class="tab-content">
+      <h2 class="section-title">Líneas Oficiales y Servicios del Metro de NY</h2>
+      <div id="full-lines-grid" class="lines-grid">
+        <!-- Generado dinámicamente -->
+      </div>
+    </section>
+
+    <!-- SECCIÓN 3: ESTACIONES -->
+    <section id="tab-estaciones" class="tab-content">
+      <div class="table-header-row">
+        <div>
+          <h2 class="section-title" style="margin:0;">Estaciones del Sistema</h2>
+          <p class="section-subtitle">12 estaciones modeladas con paradas, plataformas y accesibilidad</p>
+        </div>
+        <div class="search-box">
+          <input type="text" id="input-search-stations" placeholder="Buscar por nombre o distrito...">
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="mta-table" id="table-stations">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Estación</th>
+              <th>Distrito (Borough)</th>
+              <th>Plataformas</th>
+              <th>Accesibilidad</th>
+              <th>Elevadores</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-stations">
+            <tr><td colspan="7" class="loading-cell">Cargando estaciones desde Oracle...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECCIÓN 4: 15 CONSULTAS MÍNIMAS -->
+    <section id="tab-consultas" class="tab-content">
+      <div class="query-selector-card">
+        <div class="query-selector-header">
+          <div>
+            <h2 class="section-title" style="margin:0;">15 Consultas Mínimas Obligatorias</h2>
+            <p class="section-subtitle">Requerimientos analíticos y operativos exigidos en el enunciado del proyecto</p>
+          </div>
+          <div class="query-actions">
+            <select id="select-query" class="mta-select">
+              <option value="">-- Selecciona una consulta (1 al 15) --</option>
+            </select>
+            <button id="btn-run-query" class="btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Ejecutar Consulta
+            </button>
+          </div>
+        </div>
+
+        <div id="query-meta-box" class="query-meta-box" style="display: none;">
+          <h3 id="query-meta-title" class="query-meta-title"></h3>
+          <p id="query-meta-desc" class="query-meta-desc"></p>
+          
+          <details class="sql-accordion">
+            <summary>Ver Código SQL Ejecutado en Oracle</summary>
+            <pre><code id="query-meta-sql"></code></pre>
+          </details>
+        </div>
+      </div>
+
+      <!-- RESULTADOS DE LA CONSULTA -->
+      <div class="query-results-container">
+        <div class="results-header-info">
+          <span id="results-count-badge" class="results-badge" style="display:none;">0 registros</span>
+          <span id="results-pdb-badge" class="pdb-badge" style="display:none;"></span>
+        </div>
+        <div class="table-responsive">
+          <table class="mta-table" id="table-query-results">
+            <thead id="thead-query-results">
+              <tr><th>Resultado</th></tr>
+            </thead>
+            <tbody id="tbody-query-results">
+              <tr><td class="empty-state">Selecciona una consulta arriba y haz clic en "Ejecutar Consulta" para ver los resultados en vivo desde Oracle.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- PIE DE PÁGINA -->
+  <footer class="mta-footer">
+    <p><strong>MTA New York City Transit</strong> &bull; Proyecto de Bases de Datos I &bull; Oracle Database 21c / 23ai / 26ai Free &bull; Python Mini-Server + HTML5 / CSS3 / Vanilla JS</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
