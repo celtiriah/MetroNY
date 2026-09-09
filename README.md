@@ -72,22 +72,35 @@ sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\04_indices.ddl
 
 ---
 
-## 💻 Prototipo Web Interactivo (Dashboard & 15 Consultas)
+## 💻 Prototipos de Aplicación
 
-El proyecto incluye un prototipo web moderno con diseño oficial del Metro de Nueva York (MTA NYCT):
-* **Frontend**: HTML5 + CSS3 (Modo Oscuro) + JavaScript Vanilla (sin frameworks ni compilación).
-* **Backend**: Mini-servidor en Python con Flask y el driver oficial `oracledb`.
+El proyecto incluye dos alternativas funcionales para interactuar con la base de datos Oracle:
 
-### ¿Cómo ejecutar la aplicación web?
+### 1. Aplicación de Escritorio Nativa (PyQt5) — `prototypes/desktop`
+Ventana nativa con **conexión directa a Oracle** (sin servidores intermedios), tema claro por defecto, alternancia a tema oscuro, buscador de estaciones en vivo y ejecutor de las 15 consultas mínimas.
+
+* **En Windows (1 Clic)**:
+  Haz doble clic en:
+  ```text
+  prototypes\desktop\start.bat
+  ```
+* **En Linux / macOS**:
+  ```bash
+  chmod +x prototypes/desktop/start.sh
+  ./prototypes/desktop/start.sh
+  ```
+
+---
+
+### 2. Aplicación Web (HTML5 / CSS3 / Vanilla JS + Flask) — `prototypes/webapp`
+Dashboard web servido en `http://localhost:5000` con selector de temas y diseño oficial MTA.
 
 * **En Windows (1 Clic)**:
   Haz doble clic en:
   ```text
   start.bat
   ```
-  *(Instala dependencias si faltan, inicia el mini-servidor y abre automáticamente tu navegador en `http://localhost:5000`)*.
-
-* **En Linux / macOS / WSL**:
+* **En Linux / macOS**:
   ```bash
   chmod +x start.sh
   ./start.sh
@@ -114,7 +127,7 @@ Para conectarte desde **VS Code** (usando la extensión *Oracle SQL Developer*) 
 
 El archivo `database/consultas_minimas.ddl` contiene la resolución completa y documentada de las **15 consultas mínimas exigidas en el enunciado del proyecto**.
 
-Puedes ejecutarlas desde el **Dashboard Web** (pestaña *"15 Consultas Mínimas"*) o por terminal:
+Puedes ejecutarlas desde la **App de Escritorio PyQt5**, el **Dashboard Web**, o directamente por terminal:
 ```powershell
 sqlplus METRO_NY/MetroPass123@localhost:1521/FREEPDB1 @database\consultas_minimas.ddl
 ```
@@ -138,18 +151,23 @@ MetroNY/
 │   ├── 04_indices.ddl              # 63 Índices B-Tree optimizados en TS_METRO_IDX
 │   ├── consultas_minimas.ddl       # Las 15 consultas mínimas resueltas y formateadas
 │   └── get_pdb.sql                 # Script auxiliar para auto-detección del PDB
-├── backend/                    # Mini-servidor API REST en Python
-│   ├── app.py                  # Rutas Flask y servicio de archivos estáticos
-│   ├── db.py                   # Conexión portable a Oracle y catálogo de consultas
-│   └── requirements.txt        # Dependencias (flask, oracledb)
-├── frontend/                   # Interfaz de usuario web
-│   ├── index.html              # Dashboard con pestañas y tablas
-│   ├── style.css               # Estilos oscuros inspirados en MTA NYCT
-│   └── app.js                  # Lógica de consumo de API y tablas interactivas
+├── prototypes/
+│   ├── desktop/                # Aplicación de escritorio nativa (Python + PyQt5)
+│   │   ├── app.py              # Ventana gráfica (Dashboard, Estaciones, 15 Consultas)
+│   │   ├── db.py               # Conexión directa a Oracle y catálogo
+│   │   ├── styles.py           # Estilos QSS (Tema Claro por defecto + Tema Oscuro)
+│   │   ├── requirements.txt    # Dependencias (PyQt5, oracledb)
+│   │   ├── start.bat           # Lanzador en 1 clic para Windows
+│   │   └── start.sh            # Lanzador para Linux / macOS
+│   └── webapp/                 # Aplicación web (HTML/CSS/JS + Flask)
+│       ├── backend/            # Mini-servidor Flask y conector Oracle
+│       ├── frontend/           # HTML5, CSS3 y JS Vanilla
+│       ├── start.bat           # Lanzador web para Windows
+│       └── start.sh            # Lanzador web para Linux
 ├── dbsetup.bat                 # Instalador de la base de datos en 1 clic para Windows
 ├── dbsetup.sh                  # Instalador de la base de datos para Linux / macOS
-├── start.bat                   # Inicia el backend y abre el navegador (Windows)
-├── start.sh                    # Inicia el backend y abre el navegador (Linux)
+├── start.bat                   # Lanzador web rápido desde la raíz
+├── start.sh                    # Lanzador web rápido desde la raíz
 ├── .gitignore                  # Exclusión de binarios (.dbf), logs y temporales
 └── README.md                   # Documentación principal del repositorio
 ```
