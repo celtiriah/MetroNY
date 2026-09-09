@@ -8,6 +8,7 @@ let allStations = [];
 let allQueriesCatalog = [];
 
 document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
   initTabs();
   checkConnectionStatus();
   loadDashboardData();
@@ -15,6 +16,40 @@ document.addEventListener("DOMContentLoaded", () => {
   loadStations();
   initQueriesModule();
 });
+
+// -----------------------------------------------------------------------------
+// 0. TEMA CLARO / OSCURO (PERSISTENCIA CON LOCALSTORAGE)
+// -----------------------------------------------------------------------------
+function initTheme() {
+  const toggleBtn = document.getElementById("btn-theme-toggle");
+  const themeIcon = document.getElementById("theme-icon");
+  const themeText = document.getElementById("theme-text");
+
+  // Leer tema guardado o usar 'light' por defecto
+  const savedTheme = localStorage.getItem("mta-theme") || "light";
+  applyTheme(savedTheme);
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") || "light";
+      const newTheme = current === "dark" ? "light" : "dark";
+      applyTheme(newTheme);
+      localStorage.setItem("mta-theme", newTheme);
+    });
+  }
+
+  function applyTheme(theme) {
+    if (theme === "dark") {
+      document.documentElement.setAttribute("data-theme", "dark");
+      if (themeIcon) themeIcon.textContent = "☀️";
+      if (themeText) themeText.textContent = "Modo Claro";
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      if (themeIcon) themeIcon.textContent = "🌙";
+      if (themeText) themeText.textContent = "Modo Oscuro";
+    }
+  }
+}
 
 
 // -----------------------------------------------------------------------------
@@ -280,3 +315,4 @@ async function runSelectedQuery() {
     btnRun.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Ejecutar Consulta`;
   }
 }
+

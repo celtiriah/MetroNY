@@ -6,9 +6,9 @@ import os
 import sys
 from flask import Flask, jsonify, send_from_directory, request
 
-# Asegurar que el directorio raíz esté en sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from backend.db import execute_query, CONSULTAS_CATALOGO, DB_USER, DB_HOST, DB_PORT
+# Asegurar que el directorio local esté en sys.path
+sys.path.insert(0, os.path.dirname(__file__))
+from db import execute_query, CONSULTAS_CATALOGO, DB_USER, DB_HOST, DB_PORT
 
 # Directorio del frontend
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
