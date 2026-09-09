@@ -322,3 +322,4 @@ QScrollBar::handle:vertical:hover {
     background: #475569;
 }
 """
+

@@ -26,3 +26,4 @@ python3 -c "import PyQt5, oracledb" 2>/dev/null || {
 
 echo "[2/2] Abriendo aplicacion PyQt5..."
 python3 app.py
+

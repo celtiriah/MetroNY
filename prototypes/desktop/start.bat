@@ -25,3 +25,4 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo [2/2] Abriendo la ventana de la aplicacion...
 python app.py
+
