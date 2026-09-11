@@ -18,6 +18,7 @@ from views.dashboard_interface import DashboardInterface
 from views.stations_interface import StationsInterface
 from views.fleet_interface import FleetInterface
 from views.staff_interface import StaffInterface
+from views.cards_interface import CardsInterface
 from views.incidents_interface import IncidentsInterface
 from views.queries_interface import QueriesInterface
 
@@ -45,6 +46,7 @@ class MetroFluentApp(FluentWindow):
         self.stations_interface = StationsInterface(self)
         self.fleet_interface = FleetInterface(self)
         self.staff_interface = StaffInterface(self)
+        self.cards_interface = CardsInterface(self)
         self.incidents_interface = IncidentsInterface(self)
         self.queries_interface = QueriesInterface(self)
 
@@ -57,9 +59,11 @@ class MetroFluentApp(FluentWindow):
         self.addSubInterface(self.fleet_interface, FIF.TRAIN, "Flota y Trenes")
         # 4. Personal y Turnos (Módulo 4)
         self.addSubInterface(self.staff_interface, FIF.PEOPLE, "Personal y Turnos")
-        # 5. Operaciones e Incidentes (Módulo 7)
+        # 5. Pasajeros y Torniquetes (Módulo 5)
+        self.addSubInterface(self.cards_interface, FIF.QRCODE, "Pasajeros y Torniquetes")
+        # 6. Operaciones e Incidentes (Módulo 7)
         self.addSubInterface(self.incidents_interface, FIF.INFO, "Incidentes Operativos")
-        # 6. Consultas Mínimas Obligatorias
+        # 7. Consultas Mínimas Obligatorias
         self.addSubInterface(self.queries_interface, FIF.SEARCH, "15 Consultas Mínimas")
 
     def init_title_bar_actions(self):
@@ -128,7 +132,10 @@ class MetroFluentApp(FluentWindow):
             staff = metro_service.get_staff_summary()
             self.staff_interface.update_staff(staff)
 
-            # 6. Incidents
+            # 6. Cards & Turnstiles (Módulo 5)
+            self.cards_interface.load_cards_data()
+
+            # 7. Incidents
             incidents = metro_service.get_incidents_summary()
             self.incidents_interface.update_incidents(incidents)
 
