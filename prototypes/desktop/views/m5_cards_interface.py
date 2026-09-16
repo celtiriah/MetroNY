@@ -14,7 +14,7 @@ from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
     CardWidget, ComboBox, LineEdit, DoubleSpinBox, PrimaryPushButton,
     PushButton, TableWidget, InfoBar, InfoBarPosition, SegmentedWidget,
-    FluentIcon as FIF
+    IconWidget, FluentIcon as FIF
 )
 
 from config import MTA_BLUE
@@ -137,10 +137,10 @@ class CardsInterface(QWidget):
         kpi_layout = QHBoxLayout()
         kpi_layout.setSpacing(12)
 
-        self.kpi_total = StatCard("Total Tarjetas", "💳", "-", self)
-        self.kpi_activas = StatCard("Tarjetas Activas", "✅", "-", self)
-        self.kpi_saldo = StatCard("Saldo en Circulación", "💵", "-", self)
-        self.kpi_tarifa = StatCard("Tarifa Base MTA", "🎟️", "$2.90", self)
+        self.kpi_total = StatCard("Total Tarjetas", FIF.QRCODE, "-", self)
+        self.kpi_activas = StatCard("Tarjetas Activas", FIF.COMPLETED, "-", self)
+        self.kpi_saldo = StatCard("Saldo en Circulación", FIF.SHOPPING_CART, "-", self)
+        self.kpi_tarifa = StatCard("Tarifa Base MTA", FIF.TAG, "$2.90", self)
 
         kpi_layout.addWidget(self.kpi_total)
         kpi_layout.addWidget(self.kpi_activas)
@@ -168,8 +168,14 @@ class CardsInterface(QWidget):
         turnstile_layout.setContentsMargins(18, 16, 18, 16)
         turnstile_layout.setSpacing(10)
 
-        lbl_sim_title = StrongBodyLabel("🚇 Simulador de Paso en Torniquete", card_turnstile)
-        turnstile_layout.addWidget(lbl_sim_title)
+        row_sim_title = QHBoxLayout()
+        row_sim_title.setSpacing(8)
+        icon_sim = IconWidget(FIF.TRAIN, card_turnstile)
+        icon_sim.setFixedSize(16, 16)
+        row_sim_title.addWidget(icon_sim)
+        row_sim_title.addWidget(StrongBodyLabel("Simulador de Paso en Torniquete", card_turnstile))
+        row_sim_title.addStretch(1)
+        turnstile_layout.addLayout(row_sim_title)
 
         # Selector de Estación
         turnstile_layout.addWidget(CaptionLabel("Estación donde se ubica el torniquete:", card_turnstile))
@@ -195,8 +201,14 @@ class CardsInterface(QWidget):
         recharge_layout.setContentsMargins(18, 16, 18, 16)
         recharge_layout.setSpacing(10)
 
-        lbl_rec_title = StrongBodyLabel("💳 Recarga de Saldo OMNY / MetroCard", card_recharge)
-        recharge_layout.addWidget(lbl_rec_title)
+        row_rec_title = QHBoxLayout()
+        row_rec_title.setSpacing(8)
+        icon_rec = IconWidget(FIF.QRCODE, card_recharge)
+        icon_rec.setFixedSize(16, 16)
+        row_rec_title.addWidget(icon_rec)
+        row_rec_title.addWidget(StrongBodyLabel("Recarga de Saldo OMNY / MetroCard", card_recharge))
+        row_rec_title.addStretch(1)
+        recharge_layout.addLayout(row_rec_title)
 
         rec_input_layout = QHBoxLayout()
         rec_input_layout.setSpacing(8)
@@ -326,6 +338,9 @@ class CardsInterface(QWidget):
 
         content_layout.addLayout(right_col, stretch=6)
         main_layout.addLayout(content_layout)
+
+        # Seleccionar pestaña de historial por defecto para que aparezca activa visualmente
+        self.segmented_hist.setCurrentItem("viajes")
 
     # ======================================================================
     # LÓGICA DE CARGA DE DATOS Y EVENTOS

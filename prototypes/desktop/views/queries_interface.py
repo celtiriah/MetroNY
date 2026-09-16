@@ -221,7 +221,7 @@ class QueriesInterface(QWidget):
         header = self.table_results.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.lbl_counter.setText(f"✅ {len(rows)} filas devueltas por Oracle ({pdb})")
+        self.lbl_counter.setText(f"Filas devueltas por Oracle ({pdb}): {len(rows)}")
 
         InfoBar.success(
             title=f"Consulta Ejecutada",
@@ -232,7 +232,7 @@ class QueriesInterface(QWidget):
         )
 
     def on_error_occurred(self, error_msg: str):
-        self.lbl_counter.setText(f"❌ Error al consultar Oracle: {error_msg}")
+        self.lbl_counter.setText(f"Error al consultar Oracle: {error_msg}")
         InfoBar.error(
             title="Error de Oracle",
             content=error_msg,

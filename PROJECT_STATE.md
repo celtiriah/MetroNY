@@ -72,6 +72,7 @@ MetroNY/
 │   │   │   ├── metro_service.py # Servicios de dominio (KPIs, líneas, estaciones, flota, personal)
 │   │   │   ├── m1_network_service.py # Lógica de negocio y transacciones para MÓDULO 1 (Red y Estaciones)
 │   │   │   ├── m2_routes_service.py  # Lógica de negocio y transacciones para MÓDULO 2 (Rutas y Horarios)
+│   │   │   ├── m3_fleet_service.py   # Lógica de negocio y transacciones para MÓDULO 3 (Flota y Trenes)
 │   │   │   ├── actions_service.py # Enlace con Procedimientos Almacenados y Funciones PL/SQL
 │   │   │   └── queries_catalog.py # Catálogo de las 15 consultas analíticas con filtros dinámicos
 │   │   │
@@ -85,7 +86,7 @@ MetroNY/
 │   │       ├── dashboard_interface.py  # Panel General (resumen en vivo, 6 KPIs, líneas)
 │   │       ├── m1_stations_interface.py # MÓDULO 1: Administración de la Red (100% Implementado)
 │   │       ├── m2_routes_interface.py   # MÓDULO 2: Rutas y Horarios (100% Implementado)
-│   │       ├── m3_fleet_interface.py   # MÓDULO 3: Flota y material rodante
+│   │       ├── m3_fleet_interface.py    # MÓDULO 3: Flota y Material Rodante (100% Implementado)
 │   │       ├── m4_staff_interface.py   # MÓDULO 4: Personal y turnos
 │   │       ├── m5_cards_interface.py   # MÓDULO 5: Pasajeros, Tarjetas OMNY y Simulador Torniquete
 │   │       ├── m7_incidents_interface.py # MÓDULO 7: Incidentes y afectaciones
@@ -135,16 +136,19 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### [PENDIENTE] Módulo 3: Trenes y Material Rodante (PENDIENTE DE IMPLEMENTACIÓN)
-> **Requerimientos del Enunciado**:
-- [ ] Registrar trenes (código, modelo R142/R160/R179/R211, fabricante, año, capacidad total, depósito asignado).
-- [ ] Registrar vagones individuales (número de serie, tipo, capacidad sentados/de pie, accesibilidad).
-- [ ] Armar la composición de un tren asignando vagones en posiciones secuenciales.
-- [ ] Conservar el historial completo de asignaciones de vagones a trenes en el tiempo.
-- [ ] Modificar el estado operativo de un tren (Disponible, En Operación, En Mantenimiento, Fuera de Servicio, Retirado).
-- [ ] Consultar la disponibilidad de trenes en tiempo real mediante `FN_VERIFICAR_TREN_DISPONIBLE`.
-- [ ] Asignar trenes a viajes específicos impidiendo asignaciones simultáneas (Regla de negocio 8).
-- [ ] Bloquear automáticamente la asignación de trenes en estado de mantenimiento o con inspección técnica vencida (Regla de negocio 11).
+### [COMPLETADO] Módulo 3: Flota, Trenes y Material Rodante (COMPLETADO AL 100%)
+> **Ubicación en código**: `prototypes/desktop/views/m3_fleet_interface.py` y `prototypes/desktop/services/m3_fleet_service.py`.  
+> **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con los 8 requerimientos del enunciado oficial y las reglas de negocio 8, 11, 12 y 25:
+
+- [x] **Op 1: Registrar trenes y vagones**: Diálogos modales `TrenDialog` y `VagonDialog` para gestión integral CRUD con validación de dominios, unicidad de código/serie, año de fabricación y sincronización automática de activos en la tabla `EQUIPO`.
+- [x] **Op 2: Armar la composición de un tren**: Panel interactivo de formación activa (`TREN_VAGON`) con diálogo `AcoplarVagonDialog`, permitiendo incorporar vagones disponibles en posiciones secuenciales (`POSICION = 1, 2, 3...`), reordenar posiciones con botones reactivos Subir/Bajar y recálculo automático dinámico de `CAPACIDAD_TOTAL` en `TREN` sumando las capacidades de los vagones acoplados.
+- [x] **Op 3: Conservar el historial completo de vagones asignados (Regla de negocio 25)**: Pestaña dedicada *Historial de Composición* que audita cada asociación activa e histórica. El desacoplamiento nunca borra físicamente el registro: establece `FECHA_FIN = SYSDATE`, renombra las posiciones de los vagones restantes y libera el vagón al inventario en estado `'Disponible'`.
+- [x] **Op 4: Cambiar el estado de un tren**: Diálogo modal `CambiarEstadoTrenDialog` para transicionar entre `'Disponible'`, `'En Operación'`, `'En Mantenimiento'`, `'Fuera de Servicio'` y `'Retirado'`, disparando en Oracle el trigger de auditoría `TRG_TREN_CAMBIO_ESTADO` que registra el cambio en la tabla `BITACORA`.
+- [x] **Op 5: Consultar disponibilidad operativa en tiempo real**: Pestaña dedicada con tarjetas ejecutivas KPI y visor de diagnóstico por unidad que evalúa la función PL/SQL canónica `FN_TREN_DISPONIBLE`, órdenes de trabajo activas en `ORDEN_MANTENIMIENTO` y detección automática de inspecciones técnicas de seguridad vencidas (`FECHA_PROXIMA_INSPECCION < SYSDATE`).
+- [x] **Op 6: Asignar un tren a un viaje programado**: Diálogo modal `AsignarTrenViajeDialog` y botón de desasignación en la tabla de viajes de la flota, sincronizado con `VIAJE_PROGRAMADO`.
+- [x] **Op 7: Impedir asignaciones simultáneas solapadas (Regla de negocio 8)**: Validación rigurosa a nivel de servicio y base de datos que detecta y rechaza cualquier intento de asignar un mismo tren a dos viajes cuyos intervalos de salida y llegada se superpongan en la misma fecha.
+- [x] **Op 8: Impedir el uso de trenes en mantenimiento o fuera de servicio (Regla de negocio 11)**: Control estricto previo y cumplimiento del trigger de base de datos `TRG_TREN_MANTENIMIENTO_NO_ASIGNAR`, impidiendo que trenes en taller o retirados sean asignados a servicios de pasajeros.
+- [x] **Regla de negocio 12: Unicidad de vagón en trenes**: El acoplamiento bloquea automáticamente cualquier intento de asignar un vagón que ya se encuentre acoplado a otra unidad activa.
 
 ---
 

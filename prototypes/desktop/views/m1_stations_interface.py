@@ -124,9 +124,9 @@ class EstacionDialog(MessageBoxBase):
 
         # Checkboxes de Accesibilidad
         chk_layout = QVBoxLayout()
-        self.chk_ada = CheckBox("♿ Accesibilidad para personas con discapacidad (ADA)", self)
-        self.chk_elevadores = CheckBox("🛗 Dispone de Elevadores en servicio", self)
-        self.chk_escaleras = CheckBox("⚡ Dispone de Escaleras Eléctricas", self)
+        self.chk_ada = CheckBox("Accesibilidad para personas con discapacidad (ADA)", self)
+        self.chk_elevadores = CheckBox("Dispone de Elevadores en servicio", self)
+        self.chk_escaleras = CheckBox("Dispone de Escaleras Eléctricas", self)
 
         if self.is_edit:
             self.chk_ada.setChecked(data.get("ACCESIBLE_DISCAPACIDAD") == "S")
@@ -525,7 +525,7 @@ class StationsInterface(QWidget):
         self.combo_filtro_estado.currentIndexChanged.connect(self.apply_station_filters)
         bar_est.addWidget(self.combo_filtro_estado, stretch=2)
 
-        self.chk_filtro_ada = CheckBox("♿ Solo ADA", view_estaciones)
+        self.chk_filtro_ada = CheckBox("Solo ADA", view_estaciones)
         self.chk_filtro_ada.stateChanged.connect(self.apply_station_filters)
         bar_est.addWidget(self.chk_filtro_ada)
 
@@ -742,8 +742,11 @@ class StationsInterface(QWidget):
 
         v_lin_layout.addWidget(card_topo, stretch=5)
         self.stack_master.addWidget(view_lineas)
-
         main_layout.addWidget(self.stack_master)
+
+        # Seleccionar pestañas por defecto para que aparezcan activas visualmente
+        self.segmented_master.setCurrentItem("tab_estaciones")
+        self.segmented_est_detail.setCurrentItem("sub_plataformas")
 
     # ==========================================================================
     # CONTROL DE PESTAÑAS Y CARGA DE DATOS
@@ -786,7 +789,7 @@ class StationsInterface(QWidget):
             self.table_stations.setItem(r, 3, QTableWidgetItem(str(row.get("TIPO_ESTACION", "Local"))))
             self.table_stations.setItem(r, 4, QTableWidgetItem(str(row.get("CANTIDAD_PLATAFORMAS", "0"))))
             self.table_stations.setItem(r, 5, QTableWidgetItem(f"{row.get('TOTAL_LINEAS', 0)} líneas"))
-            ada_str = "♿ Sí (ADA)" if row.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
+            ada_str = "Sí (ADA)" if row.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
             self.table_stations.setItem(r, 6, QTableWidgetItem(ada_str))
             self.table_stations.setItem(r, 7, QTableWidgetItem(str(row.get("ESTADO_OPERATIVO", "-"))))
 
@@ -885,7 +888,7 @@ class StationsInterface(QWidget):
             self.table_line_stations.setItem(r, 3, QTableWidgetItem(str(t.get("DISTRITO", "-"))))
             self.table_line_stations.setItem(r, 4, QTableWidgetItem(f"{t.get('DISTANCIA_KM', 0)} km"))
             self.table_line_stations.setItem(r, 5, QTableWidgetItem(f"{t.get('TIEMPO_ESTIMADO_MIN', 0)} min"))
-            ada = "♿ Sí" if t.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
+            ada = "Sí (ADA)" if t.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
             self.table_line_stations.setItem(r, 6, QTableWidgetItem(ada))
 
     # ==========================================================================

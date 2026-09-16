@@ -2,7 +2,7 @@
 Dashboard Interface - Overview of network status, KPIs, and active lines.
 """
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QHeaderView, QTableWidgetItem
-from qfluentwidgets import TitleLabel, SubtitleLabel, StrongBodyLabel, TableWidget
+from qfluentwidgets import TitleLabel, SubtitleLabel, StrongBodyLabel, TableWidget, FluentIcon as FIF
 from components.stat_card import StatCard
 from components.status_card import StatusCard
 
@@ -33,12 +33,12 @@ class DashboardInterface(QWidget):
         kpi_grid.setSpacing(12)
 
         metrics = [
-            ("TOTAL_LINEAS", "Líneas Activas", "🚇", 0, 0),
-            ("TOTAL_ESTACIONES", "Estaciones", "🚉", 0, 1),
-            ("TOTAL_TRENES", "Trenes en Flota", "🚆", 0, 2),
-            ("TOTAL_EMPLEADOS", "Personal MTA", "👷", 1, 0),
-            ("TOTAL_TARJETAS", "Tarjetas OMNY", "💳", 1, 1),
-            ("INCIDENTES_ABIERTOS", "Incidentes Abiertos", "⚠️", 1, 2),
+            ("TOTAL_LINEAS", "Líneas Activas", FIF.TRAIN, 0, 0),
+            ("TOTAL_ESTACIONES", "Estaciones", FIF.PIN, 0, 1),
+            ("TOTAL_TRENES", "Trenes en Flota", FIF.BUS, 0, 2),
+            ("TOTAL_EMPLEADOS", "Personal MTA", FIF.PEOPLE, 1, 0),
+            ("TOTAL_TARJETAS", "Tarjetas OMNY", FIF.QRCODE, 1, 1),
+            ("INCIDENTES_ABIERTOS", "Incidentes Abiertos", FIF.INFO, 1, 2),
         ]
 
         for key, title_text, icon, r, c in metrics:

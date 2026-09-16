@@ -538,6 +538,9 @@ class M2RoutesInterface(QWidget):
 
         main_layout.addWidget(self.stack_views)
 
+        # Seleccionar la primera pestaña por defecto para que aparezca activa visualmente
+        self.segmented_tabs.setCurrentItem("tab_rutas")
+
     # --------------------------------------------------------------------------
     # PESTANA 1: RUTAS Y PARADAS SECUENCIALES
     # --------------------------------------------------------------------------
