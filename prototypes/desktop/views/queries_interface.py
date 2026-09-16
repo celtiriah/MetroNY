@@ -109,9 +109,13 @@ class QueriesInterface(QWidget):
         # Clear existing dynamic parameters
         while self.params_layout.count():
             item = self.params_layout.takeAt(0)
+            if item is None:
+                continue
+
             widget = item.widget()
-            if widget:
+            if widget is not None:
                 widget.deleteLater()
+
         self.param_widgets.clear()
 
         params = qinfo.get("params", [])
@@ -194,8 +198,8 @@ class QueriesInterface(QWidget):
         sql, bind_params = qinfo["sql_generator"](param_values)
 
         self.btn_run.setEnabled(False)
-        self.lbl_counter.setText("⏳ Ejecutando consulta dinámica en Oracle Database...")
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.lbl_counter.setText("Ejecutando consulta dinámica en Oracle Database...")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
         self.active_worker = QueryWorker(sql, bind_params, self)
         self.active_worker.data_loaded.connect(self.on_data_loaded)
@@ -214,7 +218,9 @@ class QueriesInterface(QWidget):
                 val = str(row.get(col, "-"))
                 self.table_results.setItem(r, c, QTableWidgetItem(val))
 
-        self.table_results.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        header = self.table_results.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
         self.lbl_counter.setText(f"✅ {len(rows)} filas devueltas por Oracle ({pdb})")
 
         InfoBar.success(

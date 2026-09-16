@@ -73,7 +73,7 @@ OMNY permite validar el ingreso directamente en los torniquetes mediante tarjeta
   * `TARJETA`, `TARIFA`, `PAGO_RECARGA`, `VIAJE_PASAJERO`.
   * **Procedimiento `SP_REGISTRAR_INGRESO`**: Deduce $2.90 (o $1.45), verifica saldo disponible $\ge$ tarifa, bloquea paso si la tarjeta está en estado `Bloqueada` o `Vencida`, y registra el paso en el torniquete.
   * **Procedimiento `SP_RECARGAR_TARJETA`**: Abona saldo a la tarjeta y registra la transacción en `PAGO_RECARGA`.
-  * **Módulo 5 Desktop (`cards_interface.py`)**: Interfaz visual de torniquete interactivo con indicador lumínico (Paso Autorizado Verde / Saldo Insuficiente Rojo).
+  * **Módulo 5 Desktop (`m5_cards_interface.py`)**: Interfaz visual de torniquete interactivo con indicador lumínico (Paso Autorizado Verde / Saldo Insuficiente Rojo).
 
 ---
 
@@ -137,7 +137,7 @@ El metro de Nueva York opera **24 horas al día, 365 días al año**. Al no cerr
   * Tablas `INCIDENTE`, `INCIDENTE_ELEMENTO`, `AFECTACION`.
   * **Procedimiento `SP_REGISTRAR_INCIDENTE`**: Registra el evento, gravedad (Baja, Media, Alta, Crítica) y elementos afectados (`LINEA`, `ESTACION`, `TRAMO_VIA`).
   * **Procedimiento `SP_CANCELAR_VIAJES_AFECTADOS`**: Cancela o reprograma de forma automática los viajes que se dirigen a un tramo cerrado.
-  * **Módulo 7 Desktop (`incidents_interface.py`)**: Monitor de incidencias activas con cálculo de retrasos en cascada.
+  * **Módulo 7 Desktop (`m7_incidents_interface.py`)**: Monitor de incidencias activas con cálculo de retrasos en cascada.
 
 ---
 

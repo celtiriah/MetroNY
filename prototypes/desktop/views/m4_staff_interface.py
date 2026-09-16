@@ -35,7 +35,10 @@ class StaffInterface(QWidget):
         self.table_staff.setHorizontalHeaderLabels([
             "Nº Empleado", "Nombre Completo", "Cargo", "Turno", "Supervisor Directo", "Licencia MTA", "Estado"
         ])
-        self.table_staff.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        header = self.table_staff.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.Stretch)
         self.table_staff.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_staff.setSelectionBehavior(TableWidget.SelectRows)
         layout.addWidget(self.table_staff)

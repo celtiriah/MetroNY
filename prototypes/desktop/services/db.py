@@ -3,6 +3,7 @@ Core Database Access Layer for Oracle Database.
 Handles automatic PDB fallback (FREEPDB1 / XEPDB1) and query execution.
 """
 import os
+from typing import Optional
 import oracledb
 from config import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, ORACLE_PDB, CANDIDATE_PDBS
 
@@ -54,7 +55,7 @@ def get_connection():
     )
 
 
-def execute_query(sql: str, params: dict = None) -> dict:
+def execute_query(sql: str, params: Optional[dict] = None) -> dict:
     """
     Executes a SQL query against Oracle and returns column headers and rows.
     """
@@ -81,6 +82,24 @@ def execute_query(sql: str, params: dict = None) -> dict:
                         row_dict[col_name] = str(val)
                 rows.append(row_dict)
         return {"columns": columns, "rows": rows, "total": len(rows), "pdb": ACTIVE_PDB}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def execute_dml(sql: str, params: Optional[dict] = None) -> dict:
+    """
+    Executes an INSERT, UPDATE, or DELETE statement and commits the transaction.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql, params or {})
+        conn.commit()
+        return {"success": True, "rowcount": cursor.rowcount}
+    except Exception as e:
+        conn.rollback()
+        raise e
     finally:
         cursor.close()
         conn.close()

@@ -226,11 +226,11 @@ El siguiente cuadro resume el enlace entre la interfaz gráfica y la lógica int
 
 | Objeto PL/SQL | Tipo | Invocado Desde (Vista / Acción) | Propósito de Negocio |
 | :--- | :---: | :--- | :--- |
-| `SP_REGISTRAR_INGRESO` | SP | `cards_interface.py` &rarr; Torniquete | Valida tarjeta, deduce tarifa ($2.90) e inserta en `VIAJE_PASAJERO`. |
-| `SP_RECARGAR_TARJETA` | SP | `cards_interface.py` &rarr; Recargas | Acredita monto, actualiza `TARJETA` y genera comprobante en `RECARGA`. |
-| `SP_CREAR_ORDEN_MANTENIMIENTO` | SP | `fleet_interface.py` &rarr; Modal Taller | Genera orden, asigna técnico y pasa el tren a `'En Mantenimiento'`. |
-| `SP_REGISTRAR_INCIDENTE` | SP | `incidents_interface.py` &rarr; Modal Incidente | Registra contingencia y relaciona los activos afectados en red. |
-| `SP_CANCELAR_VIAJES_AFECTADOS`| SP | `incidents_interface.py` &rarr; Cancelar Viajes| Pasa a `'Cancelado'` los despachos que cruzan activos clausurados. |
+| `SP_REGISTRAR_INGRESO` | SP | `m5_cards_interface.py` &rarr; Torniquete | Valida tarjeta, deduce tarifa ($2.90) e inserta en `VIAJE_PASAJERO`. |
+| `SP_RECARGAR_TARJETA` | SP | `m5_cards_interface.py` &rarr; Recargas | Acredita monto, actualiza `TARJETA` y genera comprobante en `RECARGA`. |
+| `SP_CREAR_ORDEN_MANTENIMIENTO` | SP | `m3_fleet_interface.py` &rarr; Modal Taller | Genera orden, asigna técnico y pasa el tren a `'En Mantenimiento'`. |
+| `SP_REGISTRAR_INCIDENTE` | SP | `m7_incidents_interface.py` &rarr; Modal Incidente | Registra contingencia y relaciona los activos afectados en red. |
+| `SP_CANCELAR_VIAJES_AFECTADOS`| SP | `m7_incidents_interface.py` &rarr; Cancelar Viajes| Pasa a `'Cancelado'` los despachos que cruzan activos clausurados. |
 | `SP_PROGRAMAR_VIAJE` | SP | Módulo de Despacho | Valida disponibilidad de tren y maquinista certificado antes de despachar. |
 | `FN_SALDO_TARJETA` | FN | `actions_service.py` | Retorna el saldo disponible de una tarjeta OMNY. |
 | `FN_TARJETA_VALIDA` | FN | `actions_service.py` | Evalúa si la tarjeta está activa, vigente y con saldo $\ge \$2.90$. |

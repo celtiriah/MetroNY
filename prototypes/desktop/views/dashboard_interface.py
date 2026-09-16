@@ -56,7 +56,10 @@ class DashboardInterface(QWidget):
         self.table_lines.setHorizontalHeaderLabels([
             "Código", "Nombre Oficial", "Color", "Servicio Principal", "Estado", "Estaciones"
         ])
-        self.table_lines.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        header = self.table_lines.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.Stretch)
         self.table_lines.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_lines.setSelectionBehavior(TableWidget.SelectRows)
         layout.addWidget(self.table_lines)

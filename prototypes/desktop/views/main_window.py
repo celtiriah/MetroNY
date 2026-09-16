@@ -15,11 +15,11 @@ from config import (
 )
 from services import metro_service
 from views.dashboard_interface import DashboardInterface
-from views.stations_interface import StationsInterface
-from views.fleet_interface import FleetInterface
-from views.staff_interface import StaffInterface
-from views.cards_interface import CardsInterface
-from views.incidents_interface import IncidentsInterface
+from views.m1_stations_interface import StationsInterface
+from views.m3_fleet_interface import FleetInterface
+from views.m4_staff_interface import StaffInterface
+from views.m5_cards_interface import CardsInterface
+from views.m7_incidents_interface import IncidentsInterface
 from views.queries_interface import QueriesInterface
 
 
@@ -53,16 +53,16 @@ class MetroFluentApp(FluentWindow):
     def init_navigation(self):
         # 1. Panel General
         self.addSubInterface(self.dashboard_interface, FIF.HOME, "Panel General")
-        # 2. Estaciones y Red (Módulo 1 & 2)
-        self.addSubInterface(self.stations_interface, FIF.PIN, "Estaciones y Red")
-        # 3. Flota y Mantenimiento (Módulo 3 & 6)
-        self.addSubInterface(self.fleet_interface, FIF.TRAIN, "Flota y Trenes")
-        # 4. Personal y Turnos (Módulo 4)
-        self.addSubInterface(self.staff_interface, FIF.PEOPLE, "Personal y Turnos")
-        # 5. Pasajeros y Torniquetes (Módulo 5)
-        self.addSubInterface(self.cards_interface, FIF.QRCODE, "Pasajeros y Torniquetes")
-        # 6. Operaciones e Incidentes (Módulo 7)
-        self.addSubInterface(self.incidents_interface, FIF.INFO, "Incidentes Operativos")
+        # 2. Módulo 1: Red y Estaciones
+        self.addSubInterface(self.stations_interface, FIF.PIN, "M1: Red y Estaciones")
+        # 3. Módulo 3: Flota y Trenes
+        self.addSubInterface(self.fleet_interface, FIF.TRAIN, "M3: Flota y Trenes")
+        # 4. Módulo 4: Personal y Turnos
+        self.addSubInterface(self.staff_interface, FIF.PEOPLE, "M4: Personal y Turnos")
+        # 5. Módulo 5: Pasajeros y Torniquetes
+        self.addSubInterface(self.cards_interface, FIF.QRCODE, "M5: Pasajeros y OMNY")
+        # 6. Módulo 7: Incidentes Operativos
+        self.addSubInterface(self.incidents_interface, FIF.INFO, "M7: Incidentes")
         # 7. Consultas Mínimas Obligatorias
         self.addSubInterface(self.queries_interface, FIF.SEARCH, "15 Consultas Mínimas")
 
@@ -103,7 +103,7 @@ class MetroFluentApp(FluentWindow):
             )
 
     def load_all_data(self):
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             # 1. Health check & Banner
             health = metro_service.check_db_health()
@@ -156,5 +156,6 @@ class MetroFluentApp(FluentWindow):
                 duration=4000
             )
         finally:
-            QApplication.restoreOverrideCursor()
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
 
