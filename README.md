@@ -86,11 +86,12 @@ Ubicada en `prototypes/desktop/`, es el **foco principal de desarrollo** del sis
 ### Módulos y Pantallas Disponibles en la App de Escritorio:
 1. **Dashboard General (`dashboard_interface.py`)**: 6 tarjetas métricas de estado operativo en tiempo real, resumen de líneas activas y accesos directos.
 2. **Módulo 1: Red y Estaciones (`m1_stations_interface.py`)**: Implementación completa de las 9 operaciones exigidas por la cátedra (CRUD de líneas y estaciones, asociación de estaciones, distancias y tiempos, plataformas, transferencias, consulta de líneas por estación y recorrido ordenado).
-3. **Módulo 3: Flota y Material Rodante (`m3_fleet_interface.py`)**: Directorio de unidades, estado operativo y diálogo modal para generar órdenes de mantenimiento (`SP_CREAR_ORDEN_MANTENIMIENTO`).
-4. **Módulo 4: Personal y Turnos (`m4_staff_interface.py`)**: Directorio de personal, cargos y estado de turnos y licencias.
-5. **Módulo 5: Pasajeros y Tarifas (`m5_cards_interface.py`)**: Visualizador fotorrealista de tarjeta OMNY, simulador interactivo de validación en torniquete ($2.90 con descuento real en Oracle), recarga de saldo exprés e historiales en vivo.
-6. **Módulo 7: Incidentes Operativos (`m7_incidents_interface.py`)**: Registro de incidencias en vivo (`SP_REGISTRAR_INCIDENTE`) y cancelación de viajes afectados (`SP_CANCELAR_VIAJES_AFECTADOS`).
-7. **15 Consultas Mínimas Obligatorias (`queries_interface.py`)**: Ejecución dinámica e interactiva de las 15 consultas del enunciado con filtros en tiempo real y visor SQL reactivo.
+3. **Módulo 2: Rutas y Horarios (`m2_routes_interface.py`)**: Implementación completa de las 9 operaciones exigidas (rutas locales y expresas, sentidos de marcha, paradas efectivas vs saltos expresos, horarios semanales y frecuencias, programación de viajes con validación en `SP_PROGRAMAR_VIAJE`, cancelación y reprogramación, próximos arribos por estación y cancelación en cascada por incidentes).
+4. **Módulo 3: Flota y Material Rodante (`m3_fleet_interface.py`)**: Directorio de unidades, estado operativo y diálogo modal para generar órdenes de mantenimiento (`SP_CREAR_ORDEN_MANTENIMIENTO`).
+5. **Módulo 4: Personal y Turnos (`m4_staff_interface.py`)**: Directorio de personal, cargos y estado de turnos y licencias.
+6. **Módulo 5: Pasajeros y Tarifas (`m5_cards_interface.py`)**: Visualizador fotorrealista de tarjeta OMNY, simulador interactivo de validación en torniquete ($2.90 con descuento real en Oracle), recarga de saldo exprés e historiales en vivo.
+7. **Módulo 7: Incidentes Operativos (`m7_incidents_interface.py`)**: Registro de incidencias en vivo (`SP_REGISTRAR_INCIDENTE`) y cancelación de viajes afectados (`SP_CANCELAR_VIAJES_AFECTADOS`).
+8. **15 Consultas Mínimas Obligatorias (`queries_interface.py`)**: Ejecución dinámica e interactiva de las 15 consultas del enunciado con filtros en tiempo real y visor SQL reactivo.
 
 ---
 
@@ -179,6 +180,7 @@ MetroNY/
 │   │   │   ├── db.py                 # Pool de conexiones oracledb
 │   │   │   ├── metro_service.py      # Consultas y lectura de catálogo
 │   │   │   ├── m1_network_service.py # Servicio especializado para Módulo 1 (Red y Estaciones)
+│   │   │   ├── m2_routes_service.py  # Servicio especializado para Módulo 2 (Rutas y Horarios)
 │   │   │   ├── actions_service.py    # Invocación de SPs y funciones Oracle
 │   │   │   └── queries_catalog.py    # Definición de las 15 consultas dinámicas
 │   │   ├── workers/                  # Hilos de fondo asíncronos (QThread)
@@ -187,6 +189,7 @@ MetroNY/
 │   │       ├── main_window.py        # Ventana principal y barra de navegación
 │   │       ├── dashboard_interface.py # Panel de métricas y KPIs
 │   │       ├── m1_stations_interface.py # MÓDULO 1: Administración de la Red
+│   │       ├── m2_routes_interface.py   # MÓDULO 2: Rutas y Horarios
 │   │       ├── m3_fleet_interface.py  # MÓDULO 3: Flota y material rodante
 │   │       ├── m4_staff_interface.py  # MÓDULO 4: Personal y turnos
 │   │       ├── m5_cards_interface.py  # MÓDULO 5: Pasajeros, Tarjetas OMNY y Torniquete

@@ -1365,7 +1365,7 @@ CREATE TABLE RUTA
      tipo_servicio         VARCHAR2 (20) , 
      distancia_total_km    NUMBER (6,2) , 
      duracion_estimada_min NUMBER (5) , 
-     estado                VARCHAR2 (20) , 
+     estado                VARCHAR2 (30) , 
      fecha_vigencia_desde  DATE , 
      fecha_vigencia_hasta  DATE 
     ) 

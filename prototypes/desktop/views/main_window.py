@@ -16,6 +16,7 @@ from config import (
 from services import metro_service
 from views.dashboard_interface import DashboardInterface
 from views.m1_stations_interface import StationsInterface
+from views.m2_routes_interface import M2RoutesInterface
 from views.m3_fleet_interface import FleetInterface
 from views.m4_staff_interface import StaffInterface
 from views.m5_cards_interface import CardsInterface
@@ -44,6 +45,7 @@ class MetroFluentApp(FluentWindow):
     def init_sub_interfaces(self):
         self.dashboard_interface = DashboardInterface(self)
         self.stations_interface = StationsInterface(self)
+        self.routes_interface = M2RoutesInterface(self)
         self.fleet_interface = FleetInterface(self)
         self.staff_interface = StaffInterface(self)
         self.cards_interface = CardsInterface(self)
@@ -55,15 +57,17 @@ class MetroFluentApp(FluentWindow):
         self.addSubInterface(self.dashboard_interface, FIF.HOME, "Panel General")
         # 2. Módulo 1: Red y Estaciones
         self.addSubInterface(self.stations_interface, FIF.PIN, "M1: Red y Estaciones")
-        # 3. Módulo 3: Flota y Trenes
+        # 3. Módulo 2: Rutas y Horarios
+        self.addSubInterface(self.routes_interface, FIF.BUS, "M2: Rutas y Horarios")
+        # 4. Módulo 3: Flota y Trenes
         self.addSubInterface(self.fleet_interface, FIF.TRAIN, "M3: Flota y Trenes")
-        # 4. Módulo 4: Personal y Turnos
+        # 5. Módulo 4: Personal y Turnos
         self.addSubInterface(self.staff_interface, FIF.PEOPLE, "M4: Personal y Turnos")
-        # 5. Módulo 5: Pasajeros y Torniquetes
+        # 6. Módulo 5: Pasajeros y Torniquetes
         self.addSubInterface(self.cards_interface, FIF.QRCODE, "M5: Pasajeros y OMNY")
-        # 6. Módulo 7: Incidentes Operativos
+        # 7. Módulo 7: Incidentes Operativos
         self.addSubInterface(self.incidents_interface, FIF.INFO, "M7: Incidentes")
-        # 7. Consultas Mínimas Obligatorias
+        # 8. Consultas Mínimas Obligatorias
         self.addSubInterface(self.queries_interface, FIF.SEARCH, "15 Consultas Mínimas")
 
     def init_title_bar_actions(self):
@@ -135,7 +139,10 @@ class MetroFluentApp(FluentWindow):
             # 6. Cards & Turnstiles (Módulo 5)
             self.cards_interface.load_cards_data()
 
-            # 7. Incidents
+            # 7. Routes & Schedules (Módulo 2)
+            self.routes_interface.load_all_data()
+
+            # 8. Incidents
             incidents = metro_service.get_incidents_summary()
             self.incidents_interface.update_incidents(incidents)
 

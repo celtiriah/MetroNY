@@ -130,17 +130,36 @@ python prototypes/desktop/main.py
 
 ---
 
-### 4.2 Módulo 2: Directorio de Estaciones (Red)
-- **Propósito**: Consulta de infraestructura de detención de pasajeros y accesibilidad universal.
+### 4.2 Módulo 1: Administración de la Red (Líneas y Estaciones)
+- **Propósito**: Administración integral de las líneas troncales, estaciones, andenes, transferencias subterráneas y topología secuencial de la red.
 - **Modo de Operación**:
-  1. **Búsqueda Instantánea**: Escriba en la caja de texto para filtrar estaciones por nombre (ej. `Times Sq`, `Grand Central`, `Fulton St`) o código.
-  2. **Filtro por Borough**: Filtre por distrito (`Manhattan`, `Brooklyn`, `Queens`, `The Bronx`).
-  3. **Filtro de Accesibilidad ADA**: Active la casilla `Solo accesibles (ADA)` para visualizar únicamente las estaciones equipadas con rampas y elevadores para sillas de ruedas.
-  4. **Detalle de Andenes y Servicios**: Al seleccionar una estación en la tabla, el panel inferior lista sus plataformas (Uptown / Downtown) y los servicios disponibles (Wi-Fi, sanitarios, presencia policial).
+  1. **Líneas y Red**: Diálogo modal `LineaDialog` para alta y modificación de líneas con selector de color HEX oficial MTA, terminales y estado operativo.
+  2. **Directorio de Estaciones**: Creación y edición con `EstacionDialog`, filtros por borough, búsqueda instantánea y accesibilidad ADA.
+  3. **Andenes y Plataformas**: Visualización y gestión reactiva de plataformas Uptown / Downtown con capacidades de pasajeros.
+  4. **Conexiones y Transferencias**: Definición de enlaces peatonales subterráneos inter-líneas con tiempo estimado de caminata (`TransferenciaDialog`).
+  5. **Topología de Recorrido**: Pestaña para inspeccionar todas las estaciones de una línea en orden ascendente estricto con distancias y tiempos acumulados.
 
 ---
 
-### 4.3 Módulo 3: Flota y Material Rodante
+### 4.3 Módulo 2: Rutas y Horarios
+- **Propósito**: Configuración integral de la oferta de transporte: rutas locales y expresas, secuencia ordenada de paradas con saltos expresos, frecuencias horarias semanales, programación transaccional de viajes (`SP_PROGRAMAR_VIAJE`), próximos arribos y contingencias por incidentes.
+- **Pestañas y Funcionalidades**:
+  1. **Rutas y Secuencia de Paradas**:
+     - *Catálogo de Rutas*: Creación y edición con `RutaDialog` (código, línea troncal, terminales origen/destino, distancia total en km, duración estimada y sentido Uptown / Downtown / Norte-Sur).
+     - *Secuencia de Paradas (`RUTA_DETALLE`)*: Al seleccionar una ruta, la tabla inferior lista su orden estricto de paradas. Permite agregar, editar o remover paradas con `ParadaRutaDialog`, diferenciando paradas efectivas comerciales (`SE_DETIENE = 'S'`) de sobrepasos expresos sin parada (`SE_DETIENE = 'N'`).
+  2. **Horarios y Frecuencias**:
+     - Configuración de franjas horarias con `HorarioDialog` por día de la semana (`Lunes a Viernes`, `Sabado`, `Domingo`, `Festivo`), hora inicio, hora fin y frecuencia en minutos (`FRECUENCIA_MINUTOS`).
+  3. **Despacho y Programación de Viajes**:
+     - Generación de viajes en vivo mediante el diálogo modal `ProgramarViajeDialog`.
+     - Invoca en Oracle el procedimiento canónico `SP_PROGRAMAR_VIAJE`, el cual valida mediante funciones PL/SQL la disponibilidad del tren (`FN_VERIFICAR_TREN_DISPONIBLE`) y la licencia técnica vigente del conductor (`FN_VERIFICAR_LICENCIA_VIGENTE`).
+     - Permite cancelar viajes (`'Cancelado'`) o reprogramar horarios de salida y llegada directamente desde la tabla de control.
+  4. **Próximos Arribos e Incidentes**:
+     - *Monitor de Arribos por Estación*: Selector de estación con tabla reactiva de los próximos servicios programados a arribar (`m2_routes_service.get_proximos_viajes_estacion`).
+     - *Afectaciones Operativas y Cancelación en Cascada*: Lista de incidentes activos que afectan tramos o estaciones, con botón de contingencia para invocar `SP_CANCELAR_VIAJES_AFECTADOS`.
+
+---
+
+### 4.4 Módulo 3: Flota y Material Rodante
 - **Propósito**: Administración de los trenes de la flota, monitoreo de kilometraje e intervención en talleres.
 - **Acciones Clave**:
   1. **Filtro Operativo**: Visualice trenes por su estado (`Disponible`, `En Operación`, `En Mantenimiento`, `Fuera de Servicio`).
@@ -160,7 +179,7 @@ python prototypes/desktop/main.py
 
 ---
 
-### 4.4 Módulo 4: Personal Operativo
+### 4.5 Módulo 4: Personal Operativo
 - **Propósito**: Gestión de recursos humanos, organigrama, turnos y vigencia de licencias técnicas.
 - **Modo de Operación**:
   1. **Directorio de Empleados**: Lista a maquinistas, supervisores de estación y técnicos de taller con su código institucional y fecha de contratación.
@@ -169,7 +188,7 @@ python prototypes/desktop/main.py
 
 ---
 
-### 4.5 Módulo 5: Pasajeros, Billetaje OMNY y Simulador de Torniquetes
+### 4.6 Módulo 5: Pasajeros, Billetaje OMNY y Simulador de Torniquetes
 - **Propósito**: Módulo estrella del sistema. Administra los medios de pago OMNY y permite simular el paso físico por torniquetes de estación.
 - **Componentes Visuales**:
   1. **Tarjeta OMNY Visual (`VisualOmnyCard`)**:
@@ -193,7 +212,7 @@ python prototypes/desktop/main.py
 
 ---
 
-### 4.6 Módulo 6: Gestión de Incidentes y Contingencias
+### 4.7 Módulo 7: Gestión de Incidentes y Contingencias
 - **Propósito**: Control de contingencias de tráfico (averías, emergencias médicas, inundaciones) y despacho de medidas correctivas.
 - **Acciones Clave**:
   1. **Registrar Nuevo Incidente (Acción Transaccional)**:
@@ -210,7 +229,7 @@ python prototypes/desktop/main.py
 
 ---
 
-### 4.7 Módulo 7: Las 15 Consultas Mínimas Obligatorias
+### 4.8 Consultas Analíticas del Sistema (15 Consultas Obligatorias)
 - **Propósito**: Interfaz interactiva para responder a las 15 consultas canónicas exigidas por el pliego del proyecto.
 - **Características**:
   1. **Selector de Consulta**: Menú desplegable con las 15 consultas numeradas.
@@ -230,8 +249,8 @@ El siguiente cuadro resume el enlace entre la interfaz gráfica y la lógica int
 | `SP_RECARGAR_TARJETA` | SP | `m5_cards_interface.py` &rarr; Recargas | Acredita monto, actualiza `TARJETA` y genera comprobante en `RECARGA`. |
 | `SP_CREAR_ORDEN_MANTENIMIENTO` | SP | `m3_fleet_interface.py` &rarr; Modal Taller | Genera orden, asigna técnico y pasa el tren a `'En Mantenimiento'`. |
 | `SP_REGISTRAR_INCIDENTE` | SP | `m7_incidents_interface.py` &rarr; Modal Incidente | Registra contingencia y relaciona los activos afectados en red. |
-| `SP_CANCELAR_VIAJES_AFECTADOS`| SP | `m7_incidents_interface.py` &rarr; Cancelar Viajes| Pasa a `'Cancelado'` los despachos que cruzan activos clausurados. |
-| `SP_PROGRAMAR_VIAJE` | SP | Módulo de Despacho | Valida disponibilidad de tren y maquinista certificado antes de despachar. |
+| `SP_CANCELAR_VIAJES_AFECTADOS`| SP | `m7_incidents_interface.py` / `m2_routes_interface.py` | Pasa a `'Cancelado'` los despachos que cruzan activos clausurados. |
+| `SP_PROGRAMAR_VIAJE` | SP | `m2_routes_interface.py` &rarr; ProgramarViajeDialog | Valida disponibilidad de tren y maquinista certificado antes de despachar. |
 | `FN_SALDO_TARJETA` | FN | `actions_service.py` | Retorna el saldo disponible de una tarjeta OMNY. |
 | `FN_TARJETA_VALIDA` | FN | `actions_service.py` | Evalúa si la tarjeta está activa, vigente y con saldo $\ge \$2.90$. |
 | `FN_TREN_DISPONIBLE` | FN | `actions_service.py` | Valida si un tren puede ser asignado sin órdenes de taller abiertas. |

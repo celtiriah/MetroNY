@@ -71,6 +71,7 @@ MetroNY/
 │   │   │   ├── db.py            # Conexión oracledb con pool y fallback multi-PDB
 │   │   │   ├── metro_service.py # Servicios de dominio (KPIs, líneas, estaciones, flota, personal)
 │   │   │   ├── m1_network_service.py # Lógica de negocio y transacciones para MÓDULO 1 (Red y Estaciones)
+│   │   │   ├── m2_routes_service.py  # Lógica de negocio y transacciones para MÓDULO 2 (Rutas y Horarios)
 │   │   │   ├── actions_service.py # Enlace con Procedimientos Almacenados y Funciones PL/SQL
 │   │   │   └── queries_catalog.py # Catálogo de las 15 consultas analíticas con filtros dinámicos
 │   │   │
@@ -83,6 +84,7 @@ MetroNY/
 │   │       ├── main_window.py          # Ventana principal FluentWindow (navegación y título)
 │   │       ├── dashboard_interface.py  # Panel General (resumen en vivo, 6 KPIs, líneas)
 │   │       ├── m1_stations_interface.py # MÓDULO 1: Administración de la Red (100% Implementado)
+│   │       ├── m2_routes_interface.py   # MÓDULO 2: Rutas y Horarios (100% Implementado)
 │   │       ├── m3_fleet_interface.py   # MÓDULO 3: Flota y material rodante
 │   │       ├── m4_staff_interface.py   # MÓDULO 4: Personal y turnos
 │   │       ├── m5_cards_interface.py   # MÓDULO 5: Pasajeros, Tarjetas OMNY y Simulador Torniquete
@@ -98,7 +100,7 @@ MetroNY/
 
 Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Sistema de Gestión del Metro de Nueva York.md](docs/Enunciado%20-%20Proyecto_%20Sistema%20de%20Gesti%C3%B3n%20del%20Metro%20de%20Nueva%20York.md)), el sistema comprende **7 módulos funcionales**. A continuación se detalla el estado actual de implementación de cada uno:
 
-### 🟢 Módulo 1: Administración de la Red (COMPLETADO AL 100%)
+### [COMPLETADO] Módulo 1: Administración de la Red (COMPLETADO AL 100%)
 > **Ubicación en código**: `prototypes/desktop/views/m1_stations_interface.py` y `prototypes/desktop/services/m1_network_service.py`.  
 > **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con las 9 operaciones requeridas por la cátedra:
 
@@ -114,21 +116,26 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### ⚪ Módulo 2: Rutas y Horarios (PENDIENTE DE IMPLEMENTACIÓN)
-> **Requerimientos del Enunciado**:
-- [ ] Crear rutas locales y expresas asociadas a una línea.
-- [ ] Establecer el sentido del recorrido (Uptown / Downtown / Norte / Sur).
-- [ ] Definir la secuencia de paradas de cada ruta (indicando paradas efectivas vs estaciones que el tren pasa sin detenerse para servicios expresos).
-- [ ] Configurar horarios de operación por día de la semana (laboral, fin de semana, festivo).
-- [ ] Configurar frecuencias programadas por franja horaria (pico, valle, nocturno).
-- [ ] Generar viajes programados vinculados al procedimiento almacenado `SP_PROGRAMAR_VIAJE` (validando disponibilidad de tren y licencia de conductor).
-- [ ] Cancelar o reprogramar viajes existentes.
-- [ ] Consultar los próximos viajes programados que arribarán a una estación determinada.
-- [ ] Identificar rutas afectadas ante cierres temporales de tramos o estaciones.
+### [COMPLETADO] Módulo 2: Rutas y Horarios (COMPLETADO AL 100%)
+> **Ubicación en código**: `prototypes/desktop/views/m2_routes_interface.py` y `prototypes/desktop/services/m2_routes_service.py`.  
+> **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con los 9 requerimientos oficiales del enunciado:
+
+- [x] **Op 1: Crear, modificar y eliminar rutas locales y expresas asociadas a una línea**: Diálogo modal `RutaDialog` (`m2_routes_service.crear_ruta`, `m2_routes_service.modificar_ruta`) para parametrizar código, línea troncal, estaciones terminales origen/destino, distancia total en km, duración estimada en minutos y estado operativo con conmutación en caliente (`'Activa'`, `'Cerrada Temporalmente'`). Incluye botón **"Eliminar Ruta"** con eliminación atómica en cascada (`m2_routes_service.eliminar_ruta`) de paradas, horarios, viajes e incidentes asociados previa confirmación detallando recuentos de dependencias (`m2_routes_service.get_dependencias_ruta`), y filtro dinámico por línea conectado a recarga reactiva (`refresh_rutas`).
+- [x] **Op 2: Establecer el sentido del recorrido**: Selectores validados para sentido de marcha (`Norte-Sur`, `Sur-Norte`, `Uptown`, `Downtown`, `Este-Oeste`, `Oeste-Este`) y tipo de servicio comercial (`Local`, `Expreso`).
+- [x] **Op 3: Definir la secuencia de paradas de cada ruta**: Tabla interactiva subordinada (`RUTA_DETALLE`) con diálogo modal `ParadaRutaDialog` (`m2_routes_service.asociar_parada_ruta`, `modificar_parada_ruta`, `eliminar_parada_ruta`), permitiendo configurar orden secuencial, hora de paso, distancia, tiempo acumulado e indicando condición de parada: paradas comerciales efectivas (`SE_DETIENE = 'S'`) vs estaciones que el tren sobrepasa sin detenerse en servicios expresos (`SE_DETIENE = 'N'`).
+- [x] **Op 4: Configurar y modificar horarios de operación por día de la semana**: Diálogo modal `HorarioDialog` (`m2_routes_service.crear_horario`, `modificar_horario`, `eliminar_horario`) con asignación de días (`Lunes a Viernes`, `Fin de Semana`, `Sabado`, `Domingo`, `Festivo`), franjas horarias y botón **"Modificar Horario"** con precarga completa de datos.
+- [x] **Op 5: Configurar frecuencias programadas por franja horaria**: Parámetro `FRECUENCIA_MINUTOS` configurable por franja (hora inicio, hora fin) para intervalos pico matutino, valle, pico vespertino y nocturno.
+- [x] **Op 6: Generar viajes programados vinculados al procedimiento almacenado canónico `SP_PROGRAMAR_VIAJE`**: Diálogo modal `ProgramarViajeDialog` (`m2_routes_service.programar_nuevo_viaje`), validando en Oracle la disponibilidad física del tren (`FN_VERIFICAR_TREN_DISPONIBLE`) y la certificación técnica vigente del maquinista asignado (`FN_VERIFICAR_LICENCIA_VIGENTE`), con priorización visual de conductores con certificación vigente en el selector.
+- [x] **Op 7: Cancelar, reprogramar, modificar integralmente y eliminar viajes existentes**: Acciones directas sobre la tabla de viajes:
+  - Botón **"Cancelar Viaje"** (`m2_routes_service.cancelar_viaje`).
+  - Botón **"Reprogramar / Modificar"** con diálogo modal `EditarViajeDialog` (`m2_routes_service.modificar_viaje`) para editar integralmente fecha, horas programadas de salida y llegada, tren asignado (disponible o en operación), maquinista certificado, estado operativo y pasajeros estimados.
+  - Botón **"Eliminar Viaje"** (`m2_routes_service.eliminar_viaje`) con confirmación modal y borrado en cascada de validaciones de torniquete (`VIAJE_PASAJERO`) y registros de afectación.
+- [x] **Op 8: Consultar los próximos viajes programados que arribarán a una estación determinada**: Pestaña dedicada con selector de estación y tabla reactiva en tiempo real (`m2_routes_service.get_proximos_viajes_estacion`), mostrando código de ruta, sentido, tipo de servicio, hora programada y estado.
+- [x] **Op 9: Identificar rutas y viajes afectados ante contingencias y cierres**: Panel de afectaciones activas (`m2_routes_service.get_afectaciones_activas`) y botón de despacho para invocar en cascada el procedimiento `SP_CANCELAR_VIAJES_AFECTADOS` (`m2_routes_service.cancelar_viajes_por_incidente`), protegiendo la integridad de la red.
 
 ---
 
-### ⚪ Módulo 3: Trenes y Material Rodante (PENDIENTE DE IMPLEMENTACIÓN)
+### [PENDIENTE] Módulo 3: Trenes y Material Rodante (PENDIENTE DE IMPLEMENTACIÓN)
 > **Requerimientos del Enunciado**:
 - [ ] Registrar trenes (código, modelo R142/R160/R179/R211, fabricante, año, capacidad total, depósito asignado).
 - [ ] Registrar vagones individuales (número de serie, tipo, capacidad sentados/de pie, accesibilidad).
@@ -141,7 +148,7 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### ⚪ Módulo 4: Personal Operativo (PENDIENTE DE IMPLEMENTACIÓN)
+### [PENDIENTE] Módulo 4: Personal Operativo (PENDIENTE DE IMPLEMENTACIÓN)
 > **Requerimientos del Enunciado**:
 - [ ] Registrar empleados (número, nombre, fecha nacimiento, contacto, cargo, salario, fecha de contratación).
 - [ ] Asignar estructura jerárquica de supervisión (empleado - supervisor).
@@ -154,7 +161,7 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### 🟡 Módulo 5: Pasajeros y Tarjetas OMNY (PROTOTIPADO PARCIAL / PENDIENTE DE FORMALIZACIÓN)
+### [PROTOTIPADO PARCIAL] Módulo 5: Pasajeros y Tarjetas OMNY (PROTOTIPADO PARCIAL / PENDIENTE DE FORMALIZACIÓN)
 > **Estado Actual**: Contamos con la vista interactiva `m5_cards_interface.py` que incluye la tarjeta OMNY visual, el simulador de validación en torniquete ($2.90) con invocación directa a `SP_REGISTRAR_INGRESO`, recargas exprés con `SP_RECARGAR_TARJETA` y visor de historiales.  
 > **Requerimientos pendientes para completar el módulo al 100%**:
 - [x] Recarga de saldo con actualización de balance y auditoría (`SP_RECARGAR_TARJETA`).
@@ -168,7 +175,7 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### ⚪ Módulo 6: Mantenimiento (PENDIENTE DE IMPLEMENTACIÓN)
+### [PENDIENTE] Módulo 6: Mantenimiento (PENDIENTE DE IMPLEMENTACIÓN)
 > **Requerimientos del Enunciado**:
 - [ ] Registrar equipos de infraestructura (vías, señales, andenes, elevadores, escaleras eléctricas, subestaciones).
 - [ ] Generar órdenes de mantenimiento preventivo, correctivo, predictivo o inspección técnica vinculadas a `SP_CREAR_ORDEN_MANTENIMIENTO`.
@@ -180,7 +187,7 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### ⚪ Módulo 7: Incidentes Operativos (PENDIENTE DE IMPLEMENTACIÓN)
+### [PENDIENTE] Módulo 7: Incidentes Operativos (PENDIENTE DE IMPLEMENTACIÓN)
 > **Requerimientos del Enunciado**:
 - [ ] Registrar incidencias operativas con tipología estandarizada (falla mecánica, eléctrica, señalización, médica, seguridad, clima, etc.).
 - [ ] Clasificar incidentes por nivel de severidad (Bajo, Medio, Alto, Crítico).
