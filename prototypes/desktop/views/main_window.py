@@ -20,6 +20,7 @@ from views.m2_routes_interface import M2RoutesInterface
 from views.m3_fleet_interface import FleetInterface
 from views.m4_staff_interface import StaffInterface
 from views.m5_cards_interface import CardsInterface
+from views.m6_maintenance_interface import MaintenanceInterface
 from views.m7_incidents_interface import IncidentsInterface
 from views.queries_interface import QueriesInterface
 
@@ -49,6 +50,7 @@ class MetroFluentApp(FluentWindow):
         self.fleet_interface = FleetInterface(self)
         self.staff_interface = StaffInterface(self)
         self.cards_interface = CardsInterface(self)
+        self.maintenance_interface = MaintenanceInterface(self)
         self.incidents_interface = IncidentsInterface(self)
         self.queries_interface = QueriesInterface(self)
 
@@ -65,9 +67,11 @@ class MetroFluentApp(FluentWindow):
         self.addSubInterface(self.staff_interface, FIF.PEOPLE, "M4: Personal y Turnos")
         # 6. Módulo 5: Pasajeros y Torniquetes
         self.addSubInterface(self.cards_interface, FIF.QRCODE, "M5: Pasajeros y OMNY")
-        # 7. Módulo 7: Incidentes Operativos
+        # 7. Módulo 6: Mantenimiento
+        self.addSubInterface(self.maintenance_interface, FIF.DEVELOPER_TOOLS, "M6: Mantenimiento")
+        # 8. Módulo 7: Incidentes Operativos
         self.addSubInterface(self.incidents_interface, FIF.INFO, "M7: Incidentes")
-        # 8. Consultas Mínimas Obligatorias
+        # 9. Consultas Mínimas Obligatorias
         self.addSubInterface(self.queries_interface, FIF.SEARCH, "15 Consultas Mínimas")
 
     def init_title_bar_actions(self):
@@ -142,9 +146,11 @@ class MetroFluentApp(FluentWindow):
             # 7. Routes & Schedules (Módulo 2)
             self.routes_interface.load_all_data()
 
-            # 8. Incidents
-            incidents = metro_service.get_incidents_summary()
-            self.incidents_interface.update_incidents(incidents)
+            # 8. Maintenance & Assets (Módulo 6)
+            self.maintenance_interface.load_maintenance_data()
+
+            # 9. Incidents (Módulo 7)
+            self.incidents_interface.load_incidents_data()
 
             InfoBar.success(
                 title="Datos Sincronizados",

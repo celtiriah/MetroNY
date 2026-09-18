@@ -152,54 +152,66 @@ Conforme a la especificación académica oficial ([docs/Enunciado - Proyecto_ Si
 
 ---
 
-### [PENDIENTE] Módulo 4: Personal Operativo (PENDIENTE DE IMPLEMENTACIÓN)
-> **Requerimientos del Enunciado**:
-- [ ] Registrar empleados (número, nombre, fecha nacimiento, contacto, cargo, salario, fecha de contratación).
-- [ ] Asignar estructura jerárquica de supervisión (empleado - supervisor).
-- [ ] Registrar certificaciones técnicas de conducción asociadas a modelos específicos de tren con fecha de emisión y vencimiento.
-- [ ] Programar turnos de trabajo asignados a estaciones, trenes, depósitos o centros de control.
-- [ ] Asignar conductores a viajes programados verificando licencia vigente mediante `FN_VERIFICAR_LICENCIA_VIGENTE`.
-- [ ] Controlar alertas de vencimiento de certificaciones.
-- [ ] Detectar e impedir traslapes de turnos o asignación de conductores a viajes simultáneos (Reglas de negocio 9 y 10).
-- [ ] Registrar ausencias, permisos, licencias médicas y sustituciones de personal.
+### [COMPLETADO] Módulo 4: Personal Operativo y Turnos (COMPLETADO AL 100%)
+> **Ubicación en código**: `prototypes/desktop/views/m4_staff_interface.py` y `prototypes/desktop/services/m4_staff_service.py`.  
+> **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con los 8 requerimientos del enunciado oficial y las reglas de negocio 9 y 10:
+
+- [x] **Op 1: Registrar empleados (altas, modificaciones, datos contractuales, salarios)**: Diálogo modal `EmpleadoDialog` (`m4_staff_service.crear_empleado`, `modificar_empleado`, `cambiar_estado_laboral`, `eliminar_empleado`) para gestionar número de nómina, nombre completo, fecha de nacimiento, contacto, cargo, salario, turno habitual y estado laboral (`'Activo'`, `'Permiso'`, `'Vacaciones'`, `'Suspendido'`, `'Retirado'`).
+- [x] **Op 2: Asignar cargos y estructura jerárquica de supervisión**: Asignación interactiva de supervisores directos (`SUPERVISOR_ID`), validación de integridad para evitar auto-supervisión (`id_empleado != supervisor_id`), visualización de jerarquía en tabla maestra y consulta de subordinados directos (`get_subordinados`).
+- [x] **Op 3: Registrar certificaciones técnicas asociadas a modelos de tren (`CERTIFICACION_MODELO`)**: Diálogo modal `CertificacionDialog` (`m4_staff_service.crear_certificacion`, `modificar_certificacion`, `eliminar_certificacion`) con selección multi-modelo de tren (R142, R160, etc.) persistidos en `CERTIFICACION_MODELO`, agregación de modelos con `LISTAGG` y conteo de días restantes para vencimiento.
+- [x] **Op 4: Programar turnos laborales**: Diálogo modal `TurnoDialog` (`m4_staff_service.crear_turno`, `modificar_turno`, `eliminar_turno`) para calendarizar fecha, intervalo horario (inicio y fin), tipo de lugar (`'Estación'`, `'Tren'`, `'Depósito'`, `'Centro de Control'`, `'Ruta'`), función operativa y código de turno autogenerado (`TUR-XXXXXX`).
+- [x] **Op 5: Asignar conductores a viajes programados (Reglas de negocio 9 y 10)**: Diálogo modal `AsignarConductorViajeDialog` y botón de desasignación (`m4_staff_service.asignar_conductor_viaje`, `desasignar_conductor_viaje`). Filtra conductores disponibles garantizando certificación técnica vigente para la fecha del viaje (Regla 10 y trigger `TRG_CERTIFICACION_ALERTA_VENCIDA`) e impidiendo solapamiento horario con otro viaje simultáneo (Regla 9).
+- [x] **Op 6: Controlar y auditar el vencimiento de certificaciones técnicas**: Botón de auditoría y función en lote `controlar_vencimientos_certificaciones` que detecta licencias caducadas (`fecha_vencimiento < SYSDATE`) y actualiza automáticamente su estado a `'Vencida'`.
+- [x] **Op 7: Detectar e impedir traslapes de turnos laborales**: Algoritmo predictivo en `validar_traslape_turno` (`t.hora_inicio < :nueva_fin AND t.hora_fin > :nueva_inicio`) que bloquea la creación o modificación de turnos solapados para un mismo empleado en la misma fecha, complementado con auditoría analítica global del sistema (`detectar_traslapes_turnos`).
+- [x] **Op 8: Registrar ausencias y gestionar sustituciones de personal operativo**: Diálogos modales `AsistenciaDialog` y `SustitucionDialog` (`m4_staff_service.registrar_asistencia`, `registrar_sustitucion`) para actualizar estados (`'Presente'`, `'Ausente'`, `'Permiso'`, `'Vacaciones'`) y reemplazar personal operativo marcando el turno como `'Sustituido'` y creando un nuevo turno oficial para el sustituto validando que esté `'Activo'` y libre de traslapes.
 
 ---
 
-### [PROTOTIPADO PARCIAL] Módulo 5: Pasajeros y Tarjetas OMNY (PROTOTIPADO PARCIAL / PENDIENTE DE FORMALIZACIÓN)
-> **Estado Actual**: Contamos con la vista interactiva `m5_cards_interface.py` que incluye la tarjeta OMNY visual, el simulador de validación en torniquete ($2.90) con invocación directa a `SP_REGISTRAR_INGRESO`, recargas exprés con `SP_RECARGAR_TARJETA` y visor de historiales.  
-> **Requerimientos pendientes para completar el módulo al 100%**:
-- [x] Recarga de saldo con actualización de balance y auditoría (`SP_RECARGAR_TARJETA`).
-- [x] Registro y cobro de viaje en torniquete con deducción de tarifa (`SP_REGISTRAR_INGRESO`).
-- [x] Detección reactiva de tarjetas bloqueadas, vencidas o sin saldo.
-- [x] Consulta de saldo y visualización de historiales de validación y recarga.
-- [ ] Registro formal de pasajeros frecuentes con datos demográficos y tipo (Regular, Estudiante, Adulto Mayor, Discapacidad).
-- [ ] Diálogo de emisión de nuevas tarjetas electrónicas nominales o anónimas.
-- [ ] Gestión administrativa del ciclo de vida de la tarjeta (activar, bloquear por extravío, cancelar).
-- [ ] Catálogo de tarifas con fechas de vigencia y tipos de producto (pase diario, semanal, mensual).
+### [COMPLETADO] Módulo 5: Pasajeros, Tarjetas OMNY y Torniquetes (COMPLETADO AL 100%)
+> **Ubicación en código**: `prototypes/desktop/views/m5_cards_interface.py` y `prototypes/desktop/services/m5_cards_service.py`.  
+> **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con los 10 requerimientos del enunciado oficial y las reglas de negocio 13, 14, 15, 16, 17, 18, 21 y 25:
+
+- [x] **Op 1: Registrar y modificar pasajeros frecuentes**: Diálogo modal `PasajeroDialog` (`m5_cards_service.crear_pasajero`, `modificar_pasajero`, `cambiar_estado_pasajero`, `eliminar_pasajero`) para gestionar datos demográficos, identificadores y perfiles oficiales (`'Adulto Mayor'`, `'Empleado Autorizado'`, `'Estudiante'`, `'Persona con Discapacidad'`, `'Regular'`).
+- [x] **Op 2: Emitir tarjetas nominales y anónimas (Regla de negocio 13)**: Diálogo modal `EmitirTarjetaDialog` (`m5_cards_service.emitir_tarjeta`, `modificar_tarjeta`) para crear tarjetas físicas/virtuales asignadas a pasajeros registrados o tarjetas anónimas/al portador (`PASAJERO_ID = NULL`) con saldo inicial no negativo (Regla 15).
+- [x] **Op 3: Recargar saldo de tarjetas (Regla de negocio 14)**: Panel interactivo con montos rápidos (+$5, +$10, +$20, +$50), selector de medios de pago y ejecución del procedimiento almacenado canónico `SP_RECARGAR_TARJETA` (`m5_cards_service.recargar_tarjeta`), actualizando atómicamente el saldo y registrando la transacción en `RECARGA`.
+- [x] **Op 4: Bloquear y gestionar el ciclo de vida de las tarjetas (Regla de negocio 16)**: Diálogo modal `BloquearTarjetaDialog` (`m5_cards_service.cambiar_estado_tarjeta`) para alternar estados (`'Activa'`, `'Bloqueada'`, `'Reportada Perdida'`, `'Cancelada'`, `'Vencida'`), impidiendo el acceso en torniquetes ante cualquier estado no activo o caducidad temporal.
+- [x] **Op 5: Simulación de paso por torniquete y validación de acceso (Regla de negocio 21)**: Selector de estación y tarjeta con invocación al procedimiento almacenado canónico `SP_REGISTRAR_INGRESO` (`m5_cards_service.validar_ingreso_torniquete`), comprobando en caliente que la estación esté operativa y rechazando accesos en estaciones con estado `'Cerrada Temporalmente'`.
+- [x] **Op 6: Cobro de tarifa y registro histórico en `VIAJE_PASAJERO` (Reglas de negocio 17 y 18)**: Descuento exacto de la tarifa según el perfil del usuario ($2.90 base, $1.45 reducida, $0.00 escolar) y persistencia inmutable del monto efectivamente cobrado en `VIAJE_PASAJERO.MONTO_COBRADO`.
+- [x] **Op 7: Consulta de saldo en tiempo real (Regla de negocio 15)**: Tarjeta gráfica fotorrealista `VisualOmnyCard` con diseño MTA Blue, tipografía contactless OMNY y balance interactivo con código de color (verde activo, rojo bloqueado, amarillo vencido).
+- [x] **Op 8: Historiales de viajes y recargas (Regla de negocio 25)**: Pestaña subordinada con tablas dedicadas para auditoría de validaciones en torniquete y recargas monetarias. Bloqueo estricto de eliminación física (`m5_cards_service.eliminar_tarjeta`) de tarjetas con transacciones históricas.
+- [x] **Op 9: Registro de viajes anónimos**: Botón de acceso directo en torniquete que valida ingresos contactless EMV o con tarjetas anónimas sin requerir registro previo de pasajero.
+- [x] **Op 10: Detección automática de tarjetas sin saldo o vencidas**: Validación predictiva y rechazo inmediato en torniquete con mensajes claros de saldo insuficiente o fecha de vencimiento expirada.
+- [x] **Op 11: Catálogo de tarifas y regla de Fare Capping de la MTA**: Pestaña dedicada con visor y editor de tarifas (`TARIFA`), y panel explicativo del tope tarifario semanal OMNY (máximo $34.00 / 12 viajes en ciclo lunes a domingo).
 
 ---
 
-### [PENDIENTE] Módulo 6: Mantenimiento (PENDIENTE DE IMPLEMENTACIÓN)
-> **Requerimientos del Enunciado**:
-- [ ] Registrar equipos de infraestructura (vías, señales, andenes, elevadores, escaleras eléctricas, subestaciones).
-- [ ] Generar órdenes de mantenimiento preventivo, correctivo, predictivo o inspección técnica vinculadas a `SP_CREAR_ORDEN_MANTENIMIENTO`.
-- [ ] Asignación de técnicos responsables y cuadrillas a las órdenes de trabajo.
-- [ ] Registrar repuestos utilizados en cada intervención con cantidades y costos unitarios.
-- [ ] Gestionar el ciclo de estados de la orden (Solicitada, Programada, En Ejecución, Suspendida, Completada, Cancelada).
-- [ ] Actualizar automáticamente la fecha de última revisión y calcular la fecha de próxima inspección obligatoria.
-- [ ] Consultar equipos fuera de servicio y alertas de mantenimientos preventivos vencidos.
+### [COMPLETADO] Módulo 6: Mantenimiento (COMPLETADO AL 100%)
+> **Ubicación en código**: `prototypes/desktop/views/m6_maintenance_interface.py` y `prototypes/desktop/services/m6_maintenance_service.py`.  
+> **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con los 9 requerimientos del enunciado oficial y las reglas de negocio 19 y 25:
+
+- [x] **Op 1: Registro de equipos e infraestructura (`EQUIPO`)**: Catálogo integral de activos clasificados por tipo (`'Vía'`, `'Señal'`, `'Plataforma'`, `'Elevador'`, `'Escalera Eléctrica'`, `'Tren'`, `'Vagón'`), referencias polimórficas (`'ESTACION'`, `'PLATAFORMA'`, `'TREN'`, `'VAGON'`, `'NINGUNO'`), números de serie, fabricantes y control de fechas de instalación. Diálogos modales `EquipoDialog` con alta, edición y eliminación validada.
+- [x] **Op 2: Generación de órdenes de mantenimiento vinculadas a `SP_CREAR_ORDEN_MANTENIMIENTO`**: Diálogo modal `NuevaOrdenDialog` que ejecuta el procedimiento almacenado canónico de Oracle generando la numeración `ORD-YYYY-XXXX`, asociando técnico líder, colocando la orden `'En Ejecución'` y actualizando automáticamente el estado del equipo y del tren asociado a `'En Mantenimiento'`.
+- [x] **Op 3: Asignación de cuadrillas y técnicos (`ORDEN_TECNICO`)**: Asignación de múltiples técnicos especializados (`EMPLEADO.cargo = 'Técnico de Mantenimiento'`) a las órdenes de trabajo con asignación de roles (`'Líder de Reparación'`, `'Técnico Mecánico Principal'`, `'Técnico Especialista'`, `'Inspector de Vía y Señales'`), cumplimiento estricto de la restricción `UK_ORDEN_TECNICO_1`, y panel de carga activa de cuadrillas (Consulta 15).
+- [x] **Op 4: Catálogo y consumo de repuestos con cálculo de costos (`REPUESTO` y `ORDEN_REPUESTO`)**: Catálogo administrativo de piezas con costo unitario y registro de consumo de repuestos en órdenes de trabajo. Cálculo de costos parciales e integración con la función canónica de Oracle `FN_COSTO_ORDEN_MANTENIMIENTO(p_id_orden)` para calcular el costo total consolidado (base + repuestos).
+- [x] **Op 5: Gestión del ciclo de vida de las órdenes**: Transición controlada entre estados (`'Solicitada'`, `'Programada'`, `'En Ejecución'`, `'Suspendida'`, `'Completada'`, `'Cancelada'`). Diálogo modal `CambiarEstadoOrdenDialog` y diálogo de finalización formal `CompletarOrdenDialog`.
+- [x] **Op 6: Actualización automática de última revisión y reprogramación de inspección**: Al completar formalmente una orden de trabajo, se registra `fecha_finalizacion`, se actualiza `fecha_ultima_revision = SYSDATE` y se programa automáticamente `fecha_proxima_revision = SYSDATE + N` días en `EQUIPO` (y en `TREN` si aplica).
+- [x] **Op 7: Restauración automática de disponibilidad de activos y trenes**: Al finalizar o cancelar una orden de trabajo, si no restan órdenes activas para ese equipo, su estado en `EQUIPO` se restaura atómicamente a `'Disponible'` y, si se trata de un tren, su estado en `TREN.estado_operativo` regresa a `'Disponible'`.
+- [x] **Op 8: Bloqueo estricto de trenes en mantenimiento en programación de viajes (Regla de negocio 19)**: Verificado mediante el trigger `TRG_TREN_MANTENIMIENTO_NO_ASIGNAR` en Oracle y validaciones en la capa de servicios, impidiendo despachos o asignaciones a viajes de trenes que se encuentren en taller.
+- [x] **Op 9: Monitoreo de material en taller, equipos fuera de servicio y auditoría histórica (Regla de negocio 25)**: Pestaña subordinada de alertas con vista en tiempo real de trenes en taller (`VW_TRENES_MANTENIMIENTO`), inventario de equipos fuera de servicio, detección predictiva de inspecciones de seguridad vencidas y bloqueo de borrado de equipos con órdenes históricas.
 
 ---
 
-### [PENDIENTE] Módulo 7: Incidentes Operativos (PENDIENTE DE IMPLEMENTACIÓN)
-> **Requerimientos del Enunciado**:
-- [ ] Registrar incidencias operativas con tipología estandarizada (falla mecánica, eléctrica, señalización, médica, seguridad, clima, etc.).
-- [ ] Clasificar incidentes por nivel de severidad (Bajo, Medio, Alto, Crítico).
-- [ ] Asociar incidentes con los elementos de red afectados respetando la contrainte de **Arco Exclusivo** (estación, tren, ruta, equipo).
-- [ ] Enlace con `SP_CANCELAR_VIAJES_AFECTADOS` para suspender automáticamente viajes que crucen por el sector impactado.
-- [ ] Registrar bitácora de acciones correctivas y resolución técnica.
-- [ ] Procedimiento de cierre de incidentes con cálculo exacto de la duración del evento.
-- [ ] Panel de consulta de incidentes activos y métricas estadísticas por línea y estación.
+### [COMPLETADO] Módulo 7: Incidentes Operativos (COMPLETADO AL 100%)
+> **Ubicación en código**: `prototypes/desktop/views/m7_incidents_interface.py` y `prototypes/desktop/services/m7_incidents_service.py`.  
+> **Estado**: **100% IMPLEMENTADO Y VERIFICADO**. Cumple estrictamente con los 7 requerimientos del enunciado oficial y las reglas de integridad de la base de datos:
+
+- [x] **Op 1: Registro de incidencias con tipología estandarizada y severidad**: Diálogo modal `RegistrarIncidenteDialog` conectado a `SP_REGISTRAR_INCIDENTE`, generando la numeración oficial `INC-YYYYMMDD-XXXX` y clasificando por tipo oficial (`CK_INCIDENTE_TIPO`) y severidad (`'Bajo'`, `'Medio'`, `'Alto'`, `'Crítico'`).
+- [x] **Op 2: Asociación de elementos de red con integridad de Arco Exclusivo (`CK_INCIDENTE_ELEMENTO_ARCO`)**: Soporte completo para vincular estaciones, trenes, rutas, líneas, equipos de infraestructura y viajes programados (`INCIDENTE_ELEMENTO_AFECTADO`), garantizando que exactamente una sola clave foránea sea poblada por registro y rechazando cualquier violación a nivel de base de datos.
+- [x] **Op 3: Gestión del ciclo de vida y resolución técnica de incidentes**: Transición entre estados (`'Abierto'`, `'En Atención'`, `'Cerrado'`), diálogo modal `CerrarIncidenteDialog` para consignar causa raíz identificada (`causa_identificada`), bitácora de intervenciones (`acciones_realizadas`), pasajeros estimados impactados y cálculo exacto de la duración en minutos/horas.
+- [x] **Op 4: Despacho automático de cancelaciones con `SP_CANCELAR_VIAJES_AFECTADOS`**: Enlace interactivo y por procedimiento canónico para suspender masivamente todos los viajes programados que intersecten con las estaciones, rutas o líneas declaradas como afectadas por la contingencia.
+- [x] **Op 5: Auditoría operativa en tiempo real con `BITACORA`**: Pestaña dedicada para consultar la bitácora institucional alimentada automáticamente por el trigger de Oracle `TRG_INCIDENTE_AUDITORIA` ante cada alta (`INSERT`) y modificación/cierre (`UPDATE`) de contingencias.
+- [x] **Op 6: Simulación y previsualización de impacto en viajes**: Visualizador en tiempo real de viajes en riesgo o potencialmente impactados antes y después de ejecutar la orden de cancelación.
+- [x] **Op 7: Panel de métricas y analítica de red**: Agregación estadística de contingencias por nivel de severidad, tipología técnica más recurrente y estado operativo de resolución.
 
 ---
 

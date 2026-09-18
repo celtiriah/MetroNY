@@ -115,15 +115,17 @@ FOR EACH ROW
 DECLARE
     v_certificaciones_validas NUMBER := 0;
 BEGIN
-    SELECT COUNT(*)
-    INTO v_certificaciones_validas
-    FROM CERTIFICACION
-    WHERE empleado_id = :NEW.conductor_id
-      AND estado = 'Vigente'
-      AND fecha_vencimiento >= :NEW.fecha;
+    IF :NEW.conductor_id IS NOT NULL THEN
+        SELECT COUNT(*)
+        INTO v_certificaciones_validas
+        FROM CERTIFICACION
+        WHERE empleado_id = :NEW.conductor_id
+          AND estado = 'Vigente'
+          AND fecha_vencimiento >= :NEW.fecha;
 
-    IF v_certificaciones_validas = 0 THEN
-        RAISE_APPLICATION_ERROR(-20015, 'Operacion rechazada: El conductor asignado (ID ' || :NEW.conductor_id || ') no posee una certificacion tecnica vigente para la fecha del viaje.');
+        IF v_certificaciones_validas = 0 THEN
+            RAISE_APPLICATION_ERROR(-20015, 'Operacion rechazada: El conductor asignado (ID ' || :NEW.conductor_id || ') no posee una certificacion tecnica vigente para la fecha del viaje.');
+        END IF;
     END IF;
 END;
 /

@@ -7,7 +7,7 @@
 
 ---
 
-## 🚇 Descripción del Proyecto
+## Descripción del Proyecto
 
 Este repositorio contiene la arquitectura, modelo relacional formal (3FN), scripts DDL/DML, capa de programación PL/SQL (vistas, funciones, procedimientos almacenados y triggers), datos de prueba reales, consultas analíticas y la aplicación de escritorio nativa para el **Sistema de Gestión del Metro de Nueva York (MTA NYCT)**.
 
@@ -22,7 +22,7 @@ El sistema modela de forma integral la red de transporte subterráneo:
 
 ---
 
-## 🚀 Despliegue de Base de Datos (Scripts Canónicos en 2 Pasos)
+## Despliegue de Base de Datos (Scripts Canónicos en 2 Pasos)
 
 La base de datos está organizada de forma modular en `database/` para garantizar una instalación rápida, limpia y 100% reproducible en el equipo:
 
@@ -65,7 +65,7 @@ Compila la capa de reglas de negocio en Oracle: **9 Vistas** (`VW_*`), **9 Funci
 
 ---
 
-## 💻 Aplicación de Escritorio Nativa (PyQt5 + QFluentWidgets)
+## Aplicación de Escritorio Nativa (PyQt5 + QFluentWidgets)
 
 Ubicada en `prototypes/desktop/`, es el **foco principal de desarrollo** del sistema. Proporciona una interfaz gráfica moderna conforme al estándar **Windows 11 Fluent Design System**:
 
@@ -88,14 +88,15 @@ Ubicada en `prototypes/desktop/`, es el **foco principal de desarrollo** del sis
 2. **Módulo 1: Red y Estaciones (`m1_stations_interface.py`)**: Implementación completa de las 9 operaciones exigidas por la cátedra (CRUD de líneas y estaciones, asociación de estaciones, distancias y tiempos, plataformas, transferencias, consulta de líneas por estación y recorrido ordenado).
 3. **Módulo 2: Rutas y Horarios (`m2_routes_interface.py`)**: Implementación completa de las 9 operaciones exigidas (rutas locales y expresas, sentidos de marcha, paradas efectivas vs saltos expresos, horarios semanales y frecuencias, programación de viajes con validación en `SP_PROGRAMAR_VIAJE`, cancelación y reprogramación, próximos arribos por estación y cancelación en cascada por incidentes).
 4. **Módulo 3: Flota, Trenes y Material Rodante (`m3_fleet_interface.py` y `m3_fleet_service.py`)**: Implementación completa de los 8 requerimientos (CRUD de trenes y vagones, armado de composiciones con posiciones secuenciales, preservación histórica de acoplamientos según Regla 25, conmutación de estado operativo con auditoría en BITACORA, diagnóstico de disponibilidad con `FN_TREN_DISPONIBLE` y alertas de inspección técnica, y asignación de trenes a viajes validando ausencia de solapamiento horario según Regla 8 y bloqueo de unidades en mantenimiento según Regla 11).
-5. **Módulo 4: Personal y Turnos (`m4_staff_interface.py`)**: Directorio de personal, cargos y estado de turnos y licencias.
-6. **Módulo 5: Pasajeros y Tarifas (`m5_cards_interface.py`)**: Visualizador fotorrealista de tarjeta OMNY, simulador interactivo de validación en torniquete ($2.90 con descuento real en Oracle), recarga de saldo exprés e historiales en vivo.
-7. **Módulo 7: Incidentes Operativos (`m7_incidents_interface.py`)**: Registro de incidencias en vivo (`SP_REGISTRAR_INCIDENTE`) y cancelación de viajes afectados (`SP_CANCELAR_VIAJES_AFECTADOS`).
-8. **15 Consultas Mínimas Obligatorias (`queries_interface.py`)**: Ejecución dinámica e interactiva de las 15 consultas del enunciado con filtros en tiempo real y visor SQL reactivo.
+5. **Módulo 4: Personal Operativo y Turnos (`m4_staff_interface.py` y `m4_staff_service.py`)**: Implementación completa de los 8 requerimientos oficiales (CRUD integral de empleados y salarios, jerarquía de supervisión directa con prevención de auto-supervisión, registro de certificaciones técnicas vinculadas a modelos de tren con LISTAGG, programación de turnos laborales con prevención estricta de traslapes en fecha y horario, control y auditoría de licencias vencidas, registro de asistencia y sustitución operativa de personal ausente, y asignación de conductores a viajes programados con validación de licencia vigente según Regla 10 y bloqueo de viajes solapados según Regla 9).
+6. **Módulo 5: Pasajeros, Tarjetas OMNY y Torniquetes (`m5_cards_interface.py` y `m5_cards_service.py`)**: Implementación completa de los 10 requerimientos oficiales (CRUD de pasajeros frecuentes por perfil, emisión de tarjetas nominales y anónimas según Regla 13, recargas de saldo exprés con `SP_RECARGAR_TARJETA` según Regla 14, gestión del ciclo de vida y bloqueo por extravío según Regla 16, validación de paso en torniquetes con `SP_REGISTRAR_INGRESO`, bloqueo de ingresos en estaciones cerradas según Regla 21, cobro de tarifa inmutable en `VIAJE_PASAJERO` según Reglas 17 y 18, visualizador fotorrealista `VisualOmnyCard`, viajes anónimos directos, detección de saldo insuficiente y tarjetas caducadas, y catálogo de tarifas con OMNY Fare Capping semanal).
+7. **Módulo 6: Mantenimiento y Control de Activos (`m6_maintenance_interface.py` y `m6_maintenance_service.py`)**: Implementación completa de los 9 requerimientos oficiales y las Reglas de Negocio 19 y 25 (inventario integral de infraestructura `EQUIPO` para vías, señales, andenes, elevadores, escaleras, trenes y vagones con referencias polimórficas; generación de órdenes de trabajo conectadas al procedimiento canónico `SP_CREAR_ORDEN_MANTENIMIENTO`; asignación múltiple de cuadrillas y técnicos especializados `ORDEN_TECNICO` con roles; catálogo y consumo de repuestos `REPUESTO` y `ORDEN_REPUESTO` con cálculo consolidado de costos vía `FN_COSTO_ORDEN_MANTENIMIENTO`; ciclo de vida completo de órdenes con diálogo de cierre formal, restauración atómica de disponibilidad del activo y tren, actualización de última revisión y cálculo de próxima inspección obligatoria; bloqueo estricto de viajes a trenes en taller según Regla 19; y monitoreo en vivo de trenes en taller `VW_TRENES_MANTENIMIENTO`, equipos fuera de servicio e inspecciones vencidas).
+8. **Módulo 7: Incidentes Operativos y Contingencias de Red (`m7_incidents_interface.py` y `m7_incidents_service.py`)**: Implementación completa de los 7 requerimientos oficiales y restricciones de base de datos (registro de incidentes con tipología estandarizada y severidad mediante `SP_REGISTRAR_INCIDENTE`, numeración oficial `INC-YYYYMMDD-XXXX`, asociación de elementos de red con estricta integridad de Arco Exclusivo `CK_INCIDENTE_ELEMENTO_ARCO` para estaciones, trenes, rutas, líneas, equipos y viajes; ciclo de vida completo con diálogo de cierre técnico formal registrando causa raíz, intervenciones y cálculo de duración; despacho y cancelación masiva de viajes programados con `SP_CANCELAR_VIAJES_AFECTADOS`; auditoría operativa en tiempo real sobre `BITACORA` generada por el trigger `TRG_INCIDENTE_AUDITORIA`; previsualización interactiva de viajes intersectados; y panel analítico de métricas de contingencias).
+9. **15 Consultas Mínimas Obligatorias (`queries_interface.py`)**: Ejecución dinámica e interactiva de las 15 consultas del enunciado con filtros en tiempo real y visor SQL reactivo.
 
 ---
 
-## 📊 Credenciales y Conexión Manual
+## Credenciales y Conexión Manual
 
 Para conectarse desde **VS Code** (extensión *Oracle SQL Developer*), **DBeaver**, **DataGrip** o **SQL Developer**:
 
@@ -110,7 +111,7 @@ Para conectarse desde **VS Code** (extensión *Oracle SQL Developer*), **DBeaver
 
 ---
 
-## 🔍 Consultas Mínimas Obligatorias
+## Consultas Mínimas Obligatorias
 
 El proyecto incluye la resolución completa de las **15 consultas analíticas exigidas**:
 * Se pueden ejecutar interactivamente desde la **App de Escritorio PyQt5** en la pestaña *15 Consultas*.
@@ -121,7 +122,7 @@ El proyecto incluye la resolución completa de las **15 consultas analíticas ex
 
 ---
 
-## 📚 Documentación Académica y Técnica (`docs/`)
+## Documentación Académica y Técnica (`docs/`)
 
 El proyecto cuenta con un paquete exhaustivo de documentación académica en español listo para evaluación universitaria:
 
@@ -134,7 +135,7 @@ El proyecto cuenta con un paquete exhaustivo de documentación académica en esp
 
 ---
 
-## 📁 Estructura del Repositorio
+## Estructura del Repositorio
 
 ```text
 MetroNY/
