@@ -7,7 +7,7 @@ import os
 # --- Oracle Database Configuration ---
 DB_USER = os.getenv("ORACLE_USER", "METRO_NY")
 DB_PASSWORD = os.getenv("ORACLE_PASSWORD", "MetroPass123")
-DB_HOST = os.getenv("ORACLE_HOST", "localhost")
+DB_HOST = os.getenv("ORACLE_HOST", "127.0.0.1")
 DB_PORT = int(os.getenv("ORACLE_PORT", "1521"))
 ORACLE_PDB = os.getenv("ORACLE_PDB")
 

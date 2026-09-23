@@ -29,11 +29,13 @@ class MetroFluentApp(FluentWindow):
     def __init__(self):
         super().__init__()
         self.current_theme = "light"
+        self._loaded_interfaces = set()
         self.init_window()
         self.init_sub_interfaces()
         self.init_navigation()
         self.init_title_bar_actions()
-        self.load_all_data()
+        self.stackedWidget.currentChanged.connect(self.on_current_interface_changed)
+        self.load_dashboard_data()
 
     def init_window(self):
         self.setWindowTitle(APP_TITLE)
@@ -110,10 +112,14 @@ class MetroFluentApp(FluentWindow):
                 duration=2000
             )
 
-    def load_all_data(self):
+    def on_current_interface_changed(self, index: int):
+        widget = self.stackedWidget.widget(index)
+        if widget is not None and widget not in self._loaded_interfaces:
+            self.load_interface_data(widget)
+
+    def load_dashboard_data(self):
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            # 1. Health check & Banner
             health = metro_service.check_db_health()
             self.dashboard_interface.status_card.set_online(
                 pdb_name=health["pdb"],
@@ -121,48 +127,79 @@ class MetroFluentApp(FluentWindow):
                 host=health["host"]
             )
 
-            # 2. KPIs & Lines (Dashboard)
             kpis = metro_service.get_dashboard_kpis()
             self.dashboard_interface.update_kpis(kpis)
 
             lines = metro_service.get_lines_summary()
             self.dashboard_interface.update_lines(lines)
+            self._loaded_interfaces.add(self.dashboard_interface)
+        except Exception as e:
+            self.dashboard_interface.status_card.set_error(str(e))
+            InfoBar.error(
+                title="Fallo de Conexión a Oracle",
+                content=str(e),
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000
+            )
+        finally:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
 
-            # 3. Stations
-            stations = metro_service.get_stations_summary()
-            self.stations_interface.update_stations(stations)
+    def load_interface_data(self, widget):
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            if widget is self.dashboard_interface:
+                self.load_dashboard_data()
+            elif widget is self.stations_interface:
+                stations = metro_service.get_stations_summary()
+                self.stations_interface.update_stations(stations)
+            elif widget is self.routes_interface:
+                self.routes_interface.load_all_data()
+            elif widget is self.fleet_interface:
+                fleet = metro_service.get_fleet_summary()
+                self.fleet_interface.update_fleet(fleet)
+            elif widget is self.staff_interface:
+                staff = metro_service.get_staff_summary()
+                self.staff_interface.update_staff(staff)
+            elif widget is self.cards_interface:
+                self.cards_interface.load_cards_data()
+            elif widget is self.maintenance_interface:
+                self.maintenance_interface.load_maintenance_data()
+            elif widget is self.incidents_interface:
+                self.incidents_interface.load_incidents_data()
+            self._loaded_interfaces.add(widget)
+        except Exception as e:
+            InfoBar.error(
+                title="Error al Cargar Módulo",
+                content=str(e),
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=3500
+            )
+        finally:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
 
-            # 4. Fleet
-            fleet = metro_service.get_fleet_summary()
-            self.fleet_interface.update_fleet(fleet)
-
-            # 5. Staff
-            staff = metro_service.get_staff_summary()
-            self.staff_interface.update_staff(staff)
-
-            # 6. Cards & Turnstiles (Módulo 5)
-            self.cards_interface.load_cards_data()
-
-            # 7. Routes & Schedules (Módulo 2)
-            self.routes_interface.load_all_data()
-
-            # 8. Maintenance & Assets (Módulo 6)
-            self.maintenance_interface.load_maintenance_data()
-
-            # 9. Incidents (Módulo 7)
-            self.incidents_interface.load_incidents_data()
+    def load_all_data(self):
+        """Sincroniza el dashboard y el módulo actualmente visible bajo demanda."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.load_dashboard_data()
+            current = self.stackedWidget.currentWidget()
+            if current is not None and current is not self.dashboard_interface:
+                self.load_interface_data(current)
 
             InfoBar.success(
                 title="Datos Sincronizados",
-                content=f"Conexión activa con Oracle Database ({health['pdb']}). Módulos actualizados.",
+                content="Módulos actualizados correctamente desde Oracle Database.",
                 parent=self,
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=2500
             )
         except Exception as e:
-            self.dashboard_interface.status_card.set_error(str(e))
             InfoBar.error(
-                title="Fallo de Conexión a Oracle",
+                title="Fallo de Sincronización",
                 content=str(e),
                 parent=self,
                 position=InfoBarPosition.TOP_RIGHT,
