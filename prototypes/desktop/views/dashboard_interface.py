@@ -5,6 +5,9 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QHeaderView, QTab
 from qfluentwidgets import TitleLabel, SubtitleLabel, StrongBodyLabel, TableWidget, FluentIcon as FIF
 from components.stat_card import StatCard
 from components.status_card import StatusCard
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 class DashboardInterface(QWidget):
@@ -57,9 +60,7 @@ class DashboardInterface(QWidget):
             "Código", "Nombre Oficial", "Color", "Servicio Principal", "Estado", "Estaciones"
         ])
         
-        header = self.table_lines.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_lines, min_col_width=75)
         self.table_lines.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_lines.setSelectionBehavior(TableWidget.SelectRows)
         layout.addWidget(self.table_lines)
@@ -73,8 +74,18 @@ class DashboardInterface(QWidget):
         for r, row in enumerate(lines):
             self.table_lines.setItem(r, 0, QTableWidgetItem(str(row.get("CODIGO", "-"))))
             self.table_lines.setItem(r, 1, QTableWidgetItem(str(row.get("NOMBRE", "-"))))
-            self.table_lines.setItem(r, 2, QTableWidgetItem(str(row.get("COLOR", "-"))))
-            self.table_lines.setItem(r, 3, QTableWidgetItem(str(row.get("TIPO_SERVICIO_PRINCIPAL", "-"))))
-            self.table_lines.setItem(r, 4, QTableWidgetItem(str(row.get("ESTADO_OPERATIVO", "-"))))
+            
+            col_hex = str(row.get("COLOR", "#0039A6")).strip()
+            chip = LineColorChip(col_hex, col_hex, "", self.table_lines)
+            self.table_lines.setCellWidget(r, 2, chip)
+
+            srv = str(row.get("TIPO_SERVICIO_PRINCIPAL", "-"))
+            self.table_lines.setCellWidget(r, 3, StatusBadge(srv, self.table_lines))
+
+            st = str(row.get("ESTADO_OPERATIVO", "-"))
+            self.table_lines.setCellWidget(r, 4, StatusBadge(st, self.table_lines))
+
             self.table_lines.setItem(r, 5, QTableWidgetItem(f"{row.get('ESTACIONES', 0)} paradas"))
+
+        auto_fit_table_columns(self.table_lines)
 

@@ -39,3 +39,5 @@ desktop.ini
 .vscode/*
 !.vscode/settings.json
 
+scratch/
+database/01_ddl/

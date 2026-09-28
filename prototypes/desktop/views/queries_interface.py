@@ -19,6 +19,7 @@ from qfluentwidgets import (
 from services.queries_catalog import CONSULTAS_CATALOGO
 from services import metro_service
 from workers.query_worker import QueryWorker
+from views.components import StatusBadge, configure_interactive_table, auto_fit_table_columns
 
 
 class QueriesInterface(QWidget):
@@ -91,8 +92,9 @@ class QueriesInterface(QWidget):
         # Results Table
         self.table_results = TableWidget(self)
         self.table_results.setBorderVisible(True)
-        self.table_results.setEditTriggers(TableWidget.NoEditTriggers)
-        self.table_results.setSelectionBehavior(TableWidget.SelectRows)
+        self.table_results.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
+        self.table_results.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        configure_interactive_table(self.table_results)
         layout.addWidget(self.table_results)
 
         # Load initial query
@@ -216,11 +218,13 @@ class QueriesInterface(QWidget):
         for r, row in enumerate(rows):
             for c, col in enumerate(columns):
                 val = str(row.get(col, "-"))
-                self.table_results.setItem(r, c, QTableWidgetItem(val))
+                col_upper = col.upper()
+                if any(k in col_upper for k in ("ESTADO", "SEVERIDAD", "PRIORIDAD", "ACTIVO", "OPERAT")) and val not in ("-", "", "None"):
+                    self.table_results.setCellWidget(r, c, StatusBadge(val, self.table_results))
+                else:
+                    self.table_results.setItem(r, c, QTableWidgetItem(val))
 
-        header = self.table_results.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        auto_fit_table_columns(self.table_results)
         self.lbl_counter.setText(f"Filas devueltas por Oracle ({pdb}): {len(rows)}")
 
         InfoBar.success(

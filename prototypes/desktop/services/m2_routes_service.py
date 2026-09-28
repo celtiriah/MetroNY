@@ -262,11 +262,20 @@ def get_paradas_ruta(ruta_id: int) -> List[Dict[str, Any]]:
 
 def agregar_parada_ruta(datos: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Agrega una parada a la secuencia de la ruta.
+    Agrega una parada a la secuencia de la ruta con validación previa de estación activa.
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        est_id = int(datos["estacion_id"])
+        cursor.execute("SELECT estado_operativo, nombre FROM ESTACION WHERE id_estacion = :id", {"id": est_id})
+        row_est = cursor.fetchone()
+        if row_est and str(row_est[0]) in ("Cerrada", "Inactiva"):
+            return {
+                "success": False,
+                "error": f"Operación denegada: La estación '{row_est[1]}' se encuentra {row_est[0]} y no puede ser agregada como parada activa."
+            }
+
         hora_llegada = datos.get("hora_estimada_llegada")
         hora_salida = datos.get("hora_estimada_salida")
 
@@ -284,7 +293,7 @@ def agregar_parada_ruta(datos: Dict[str, Any]) -> Dict[str, Any]:
         """
         cursor.execute(sql, {
             "ruta_id": int(datos["ruta_id"]),
-            "estacion_id": int(datos["estacion_id"]),
+            "estacion_id": est_id,
             "orden_llegada": int(datos["orden_llegada"]),
             "h_llegada": hora_llegada if hora_llegada else None,
             "h_salida": hora_salida if hora_salida else None,
@@ -597,7 +606,7 @@ def cancelar_viaje(id_viaje: int) -> Dict[str, Any]:
 
 def reprogramar_viaje(id_viaje: int, nueva_fecha: str, nueva_salida: str, nueva_llegada: str) -> Dict[str, Any]:
     """
-    Reprograma la fecha y horas de un viaje programado.
+    Reprograma la fecha y horas de un viaje programado, actualizando su estado a 'Reprogramado'.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -607,7 +616,7 @@ def reprogramar_viaje(id_viaje: int, nueva_fecha: str, nueva_salida: str, nueva_
                 fecha = TO_DATE(:fecha, 'YYYY-MM-DD'),
                 hora_prog_salida = TO_TIMESTAMP(:fecha || ' ' || :salida || ':00', 'YYYY-MM-DD HH24:MI:SS'),
                 hora_prog_llegada = TO_TIMESTAMP(:fecha || ' ' || :llegada || ':00', 'YYYY-MM-DD HH24:MI:SS'),
-                estado = 'Programado'
+                estado = 'Reprogramado'
             WHERE id_viaje = :id_v
         """
         cursor.execute(sql, {
@@ -626,19 +635,50 @@ def reprogramar_viaje(id_viaje: int, nueva_fecha: str, nueva_salida: str, nueva_
         conn.close()
 
 
-def eliminar_viaje(id_viaje: int) -> Dict[str, Any]:
+def eliminar_viaje(id_viaje: int, forzar_soft_delete: bool = True) -> Dict[str, Any]:
     """
-    Elimina un viaje programado y sus validaciones de pasajeros en cascada.
+    Cancela o da de baja un viaje programado con estricta protección de inmutabilidad histórica.
+    Por defecto ejecuta un Soft-Delete (marcar como 'Cancelado') para proteger el historial
+    de validaciones de pasajeros e incidentes en la red MTA NYCT.
+    Si se intenta borrado físico, bloquea si existen registros dependientes.
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
         vid = int(id_viaje)
-        cursor.execute("DELETE FROM INCIDENTE_ELEMENTO_AFECTADO WHERE viaje_id = :vid", {"vid": vid})
-        cursor.execute("DELETE FROM VIAJE_PASAJERO WHERE viaje_programado_id = :vid", {"vid": vid})
+
+        # Consultar dependencias históricas
+        cursor.execute("SELECT COUNT(*) FROM VIAJE_PASAJERO WHERE viaje_programado_id = :vid", {"vid": vid})
+        row_p = cursor.fetchone()
+        cnt_pasajeros = int(row_p[0]) if row_p else 0
+
+        cursor.execute("SELECT COUNT(*) FROM INCIDENTE_ELEMENTO_AFECTADO WHERE viaje_id = :vid", {"vid": vid})
+        row_i = cursor.fetchone()
+        cnt_incidentes = int(row_i[0]) if row_i else 0
+
+        if forzar_soft_delete:
+            cursor.execute("UPDATE VIAJE_PROGRAMADO SET estado = 'Cancelado' WHERE id_viaje = :vid", {"vid": vid})
+            conn.commit()
+            return {
+                "success": True,
+                "mensaje": f"Viaje #{vid} cancelado operativamente de forma segura (Soft-Delete: estado 'Cancelado'). El historial de pasajeros e incidencias se preservó intacto.",
+                "soft_deleted": True
+            }
+
+        # Intento de Hard-Delete físico
+        if cnt_pasajeros > 0 or cnt_incidentes > 0:
+            return {
+                "success": False,
+                "error": f"Bloqueo de seguridad relacional: No se permite la eliminación física (Hard-Delete) del viaje #{vid} porque posee registros vinculados ({cnt_pasajeros} validaciones de pasajeros, {cnt_incidentes} incidentes). Utilice la cancelación lógica (Soft-Delete) para preservar el historial."
+            }
+
         cursor.execute("DELETE FROM VIAJE_PROGRAMADO WHERE id_viaje = :vid", {"vid": vid})
         conn.commit()
-        return {"success": True, "mensaje": f"Viaje #{vid} eliminado correctamente."}
+        return {
+            "success": True,
+            "mensaje": f"Viaje #{vid} sin dependencias eliminado físicamente de la base de datos.",
+            "soft_deleted": False
+        }
     except Exception as e:
         conn.rollback()
         return {"success": False, "error": parse_oracle_error(e)}

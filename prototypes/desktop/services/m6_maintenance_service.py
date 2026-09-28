@@ -4,12 +4,81 @@ Gestiona el catalogo de equipos e infraestructura, ordenes de trabajo preventiva
 asignacion de cuadrillas tecnicas, consumo de repuestos y calculo de costos consolidados.
 Cumple con los 9 requerimientos oficiales y las Reglas de Negocio 19 y 25.
 """
-from typing import Optional, List, Dict, Any
+import re
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date
 import oracledb
 
 from services.db import get_connection, execute_query
 from services.actions_service import parse_oracle_error, crear_orden_mantenimiento as sp_crear_orden_mantenimiento
+
+
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+# ==============================================================================
+# VALIDACIONES DE NEGOCIO Y DOMINIO
+# ==============================================================================
+
+def _validar_datos_repuesto(
+    codigo: str,
+    nombre: str,
+    costo_unitario: float,
+    stock_disponible: int = 0
+) -> Optional[str]:
+    """Valida los datos de una pieza de repuesto antes de persistir."""
+    if not codigo or not codigo.strip():
+        return "El código de la pieza es obligatorio."
+    cod = codigo.strip().upper()
+    if not re.match(r"^REP-[A-Z0-9]{2,8}(-[A-Z0-9]{1,4})?$", cod):
+        return "El código debe cumplir con el formato estándar de inventario (ej. REP-1001 o REP-BRK-01)."
+    if not nombre or len(nombre.strip()) < 3:
+        return "La denominación de la pieza debe contener al menos 3 caracteres."
+    if len(nombre.strip()) > 100:
+        return "La denominación de la pieza no puede exceder 100 caracteres."
+    if costo_unitario < 0:
+        return "El costo unitario no puede ser negativo."
+    if stock_disponible < 0:
+        return "El stock inicial disponible no puede ser negativo."
+    return None
+
+
+def _validar_datos_orden(
+    equipo_id: int,
+    tipo_mantenimiento: str,
+    descripcion: str,
+    prioridad: str
+) -> Optional[str]:
+    """Valida los datos principales para apertura de orden de mantenimiento."""
+    if equipo_id <= 0:
+        return "Debe seleccionar un activo o equipo válido."
+    tipos_validos = ("Preventivo", "Correctivo", "Predictivo", "Inspección de Seguridad")
+    if tipo_mantenimiento not in tipos_validos:
+        return f"Tipo de mantenimiento inválido. Permitidos: {', '.join(tipos_validos)}."
+    if not descripcion or len(descripcion.strip()) < 3:
+        return "La descripción del trabajo debe contener al menos 3 caracteres."
+    if len(descripcion.strip()) > 500:
+        return "La descripción del trabajo no puede exceder 500 caracteres."
+    prioridades_validas = ("Baja", "Media", "Alta", "Urgente")
+    if prioridad not in prioridades_validas:
+        return f"Prioridad inválida. Permitidas: {', '.join(prioridades_validas)}."
+    return None
+
 
 
 # ==============================================================================
@@ -246,6 +315,51 @@ def actualizar_fechas_inspeccion(
         conn.close()
 
 
+def verificar_dependencias_equipo(id_equipo: int) -> Dict[str, Any]:
+    """Verifica si el equipo posee ordenes activas o historicas asociadas."""
+    sql = """
+        SELECT 
+            (SELECT COUNT(*) FROM ORDEN_MANTENIMIENTO WHERE equipo_id = :id_eq) AS total_ordenes,
+            (SELECT COUNT(*) FROM ORDEN_MANTENIMIENTO WHERE equipo_id = :id_eq AND estado IN ('En Ejecución', 'En Ejecucion', 'Programada', 'Solicitada')) AS ordenes_activas
+        FROM DUAL
+    """
+    rows = execute_query(sql, {"id_eq": int(id_equipo)})["rows"]
+    if rows:
+        r = rows[0]
+        tot = _safe_int(r.get("TOTAL_ORDENES"))
+        act = _safe_int(r.get("ORDENES_ACTIVAS"))
+        return {"total_ordenes": tot, "ordenes_activas": act, "tiene_dependencias": tot > 0}
+    return {"total_ordenes": 0, "ordenes_activas": 0, "tiene_dependencias": False}
+
+
+def dar_de_baja_equipo(id_equipo: int) -> Dict[str, Any]:
+    """Da de baja un equipo de forma segura cambiando su estado a 'Retirado'."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM ORDEN_MANTENIMIENTO 
+            WHERE equipo_id = :id_eq AND estado IN ('En Ejecución', 'En Ejecucion', 'Programada', 'Solicitada')
+        """, {"id_eq": int(id_equipo)})
+        count_act = int(cursor.fetchone()[0])
+        if count_act > 0:
+            return {
+                "success": False,
+                "error": f"No se puede dar de baja el activo {id_equipo} porque tiene {count_act} orden(es) activa(s) en ejecución. Finalícelas o cancélelas primero."
+            }
+
+        cursor.execute("UPDATE EQUIPO SET estado = 'Retirado' WHERE id_equipo = :id_eq", {"id_eq": int(id_equipo)})
+        conn.commit()
+        return {"success": True, "mensaje": f"Activo {id_equipo} dado de baja exitosamente (Estado: 'Retirado')."}
+    except Exception as e:
+        conn.rollback()
+        return {"success": False, "error": parse_oracle_error(e)}
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def eliminar_equipo(id_equipo: int) -> Dict[str, Any]:
     """
     Elimina un equipo si no posee ordenes de mantenimiento o incidentes historicos
@@ -396,6 +510,10 @@ def crear_orden(
     SP_CREAR_ORDEN_MANTENIMIENTO.
     Actualiza automaticamente el estado del equipo y tren a 'En Mantenimiento'.
     """
+    err = _validar_datos_orden(equipo_id, tipo_mantenimiento, descripcion, prioridad)
+    if err:
+        return {"success": False, "error": err}
+
     return sp_crear_orden_mantenimiento(
         equipo_id=int(equipo_id),
         tipo_mantenimiento=tipo_mantenimiento,
@@ -429,77 +547,39 @@ def completar_orden(
     dias_proxima_revision: int = 90
 ) -> Dict[str, Any]:
     """
-    Finaliza formalmente una orden de mantenimiento:
-    1. Establece estado = 'Completada' y fecha_finalizacion = SYSDATE o indicada.
-    2. Actualiza el costo acumulado con FN_COSTO_ORDEN_MANTENIMIENTO o el valor dado.
-    3. Restaura el estado del equipo a 'Disponible'.
-    4. Actualiza la fecha de ultima revision a SYSDATE y calcula la proxima revision.
-    5. Si el equipo es un tren (tipo_referencia = 'TREN'), restaura TREN.estado_operativo a 'Disponible'
-       y actualiza sus fechas de inspeccion.
+    Finaliza formalmente una orden de mantenimiento invocando el procedimiento
+    canonico SP_CERRAR_ORDEN_MANTENIMIENTO:
+    1. Valida cuadrilla de tecnicos asignada (TRG_ORDEN_MANT_VALIDAR_CIERRE).
+    2. Establece estado = 'Completada' y fecha_finalizacion auditada.
+    3. Actualiza el costo acumulado con FN_COSTO_ORDEN_MANTENIMIENTO o el valor auditado.
+    4. Restaura el estado del equipo y tren a 'Disponible' y programa proxima inspeccion.
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Obtener equipo_id y tipo_referencia
-        cursor.execute("""
-            SELECT om.equipo_id, eq.tipo_referencia, eq.referencia_id
-            FROM ORDEN_MANTENIMIENTO om
-            JOIN EQUIPO eq ON om.equipo_id = eq.id_equipo
-            WHERE om.id_orden = :id_ord
-        """, {"id_ord": int(id_orden)})
-        row = cursor.fetchone()
-        if not row:
-            return {"success": False, "error": f"Orden {id_orden} no encontrada."}
+        v_msg = cursor.var(oracledb.STRING)
+        f_date = None
+        if fecha_fin and fecha_fin.strip():
+            try:
+                f_date = datetime.strptime(fecha_fin.strip(), "%Y-%m-%d %H:%M")
+            except ValueError:
+                try:
+                    f_date = datetime.strptime(fecha_fin.strip(), "%Y-%m-%d")
+                except ValueError:
+                    f_date = None
 
-        equipo_id = int(row[0])
-        tipo_ref = str(row[1] or "NINGUNO")
-        ref_id = int(row[2]) if row[2] is not None else None
-
-        # Actualizar orden
-        sql_update_ord = """
-            UPDATE ORDEN_MANTENIMIENTO
-            SET estado = 'Completada',
-                fecha_finalizacion = NVL(TO_DATE(:f_fin, 'YYYY-MM-DD HH24:MI'), SYSDATE),
-                costo = NVL(:costo, costo)
-            WHERE id_orden = :id_ord
-        """
-        cursor.execute(sql_update_ord, {
-            "f_fin": fecha_fin,
-            "costo": costo_final,
-            "id_ord": int(id_orden)
-        })
-
-        # Restaurar estado del equipo a Disponible y actualizar fechas
-        sql_update_eq = """
-            UPDATE EQUIPO
-            SET estado = 'Disponible',
-                fecha_ultima_revision = SYSDATE,
-                fecha_proxima_revision = SYSDATE + :dias
-            WHERE id_equipo = :id_eq
-        """
-        cursor.execute(sql_update_eq, {
-            "dias": int(dias_proxima_revision),
-            "id_eq": equipo_id
-        })
-
-        # Si el equipo era un tren, restaurar TREN
-        if tipo_ref == "TREN" and ref_id is not None:
-            sql_update_tren = """
-                UPDATE TREN
-                SET estado_operativo = 'Disponible',
-                    fecha_ultima_inspeccion = SYSDATE,
-                    fecha_proxima_inspeccion = SYSDATE + :dias
-                WHERE id_tren = :id_tren
-            """
-            cursor.execute(sql_update_tren, {
-                "dias": int(dias_proxima_revision),
-                "id_tren": ref_id
-            })
-
+        cursor.callproc("SP_CERRAR_ORDEN_MANTENIMIENTO", [
+            int(id_orden),
+            float(costo_final) if costo_final is not None else None,
+            f_date,
+            int(dias_proxima_revision),
+            v_msg
+        ])
         conn.commit()
+        msg_val = v_msg.getvalue()
         return {
             "success": True,
-            "mensaje": f"Orden {id_orden} completada exitosamente. Activo reintegrado a estado 'Disponible'."
+            "mensaje": str(msg_val or f"Orden {id_orden} completada exitosamente.")
         }
     except Exception as e:
         conn.rollback()
@@ -679,12 +759,13 @@ def desasignar_tecnico(id_orden_tecnico: int) -> Dict[str, Any]:
 # ==============================================================================
 
 def get_catalogo_repuestos(search_text: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retorna el catalogo de repuestos utilizables en intervenciones."""
+    """Retorna el catalogo de repuestos utilizables en intervenciones con stock disponible."""
     sql = """
         SELECT r.id_repuesto,
                r.codigo,
                r.nombre,
                r.costo_unitario,
+               r.stock_disponible,
                NVL((SELECT SUM(orp.cantidad) FROM ORDEN_REPUESTO orp WHERE orp.repuesto_id = r.id_repuesto), 0) AS total_consumido
         FROM REPUESTO r
         WHERE 1 = 1
@@ -698,21 +779,31 @@ def get_catalogo_repuestos(search_text: Optional[str] = None) -> List[Dict[str, 
     return execute_query(sql, params)["rows"]
 
 
-def crear_repuesto(codigo: str, nombre: str, costo_unitario: float) -> Dict[str, Any]:
+def crear_repuesto(
+    codigo: str,
+    nombre: str,
+    costo_unitario: float,
+    stock_disponible: int = 50
+) -> Dict[str, Any]:
     """Registra una nueva pieza en el catalogo de REPUESTO."""
+    err = _validar_datos_repuesto(codigo, nombre, costo_unitario, stock_disponible)
+    if err:
+        return {"success": False, "error": err}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
         v_id = cursor.var(oracledb.NUMBER)
         sql = """
-            INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario)
-            VALUES (SEQ_REPUESTO.NEXTVAL, :cod, :nom, :costo)
+            INSERT INTO REPUESTO (id_repuesto, codigo, nombre, costo_unitario, stock_disponible)
+            VALUES (SEQ_REPUESTO.NEXTVAL, :cod, :nom, :costo, :stock)
             RETURNING id_repuesto INTO :v_id
         """
         cursor.execute(sql, {
-            "cod": codigo.strip(),
+            "cod": codigo.strip().upper(),
             "nom": nombre.strip(),
             "costo": float(costo_unitario),
+            "stock": int(stock_disponible),
             "v_id": v_id
         })
         conn.commit()
@@ -720,7 +811,7 @@ def crear_repuesto(codigo: str, nombre: str, costo_unitario: float) -> Dict[str,
         return {
             "success": True,
             "id_repuesto": id_gen,
-            "mensaje": f"Repuesto {codigo} registrado con ID {id_gen}."
+            "mensaje": f"Repuesto {codigo.strip().upper()} registrado con ID {id_gen}."
         }
     except Exception as e:
         conn.rollback()
@@ -730,8 +821,18 @@ def crear_repuesto(codigo: str, nombre: str, costo_unitario: float) -> Dict[str,
         conn.close()
 
 
-def modificar_repuesto(id_repuesto: int, codigo: str, nombre: str, costo_unitario: float) -> Dict[str, Any]:
-    """Modifica el codigo, descripcion o costo unitario de un repuesto."""
+def modificar_repuesto(
+    id_repuesto: int,
+    codigo: str,
+    nombre: str,
+    costo_unitario: float,
+    stock_disponible: int = 50
+) -> Dict[str, Any]:
+    """Modifica el codigo, descripcion, costo unitario o stock de un repuesto."""
+    err = _validar_datos_repuesto(codigo, nombre, costo_unitario, stock_disponible)
+    if err:
+        return {"success": False, "error": err}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -739,23 +840,33 @@ def modificar_repuesto(id_repuesto: int, codigo: str, nombre: str, costo_unitari
             UPDATE REPUESTO
             SET codigo = :cod,
                 nombre = :nom,
-                costo_unitario = :costo
+                costo_unitario = :costo,
+                stock_disponible = :stock
             WHERE id_repuesto = :id_rep
         """
         cursor.execute(sql, {
-            "cod": codigo.strip(),
+            "cod": codigo.strip().upper(),
             "nom": nombre.strip(),
             "costo": float(costo_unitario),
+            "stock": int(stock_disponible),
             "id_rep": int(id_repuesto)
         })
         conn.commit()
-        return {"success": True, "mensaje": f"Repuesto {codigo} actualizado exitosamente."}
+        return {"success": True, "mensaje": f"Repuesto {codigo.strip().upper()} actualizado exitosamente."}
     except Exception as e:
         conn.rollback()
         return {"success": False, "error": parse_oracle_error(e)}
     finally:
         cursor.close()
         conn.close()
+
+
+def verificar_dependencias_repuesto(id_repuesto: int) -> Dict[str, Any]:
+    """Verifica consumos historicos de un repuesto en ordenes de mantenimiento."""
+    sql = "SELECT COUNT(*) AS total_consumos FROM ORDEN_REPUESTO WHERE repuesto_id = :id_rep"
+    rows = execute_query(sql, {"id_rep": int(id_repuesto)})["rows"]
+    tot = _safe_int(rows[0].get("TOTAL_CONSUMOS")) if rows else 0
+    return {"total_consumos": tot, "tiene_dependencias": tot > 0}
 
 
 def eliminar_repuesto(id_repuesto: int) -> Dict[str, Any]:
@@ -808,7 +919,7 @@ def registrar_consumo_repuesto(
 ) -> Dict[str, Any]:
     """
     Registra el uso de un repuesto en una orden de mantenimiento.
-    Calcula el costo total = cantidad * costo_unitario y actualiza ORDEN_REPUESTO.
+    Calcula el costo total = cantidad * costo_unitario y descuenta del stock.
     """
     if cantidad <= 0:
         return {"success": False, "error": "La cantidad de repuestos debe ser mayor a cero."}
@@ -816,13 +927,20 @@ def registrar_consumo_repuesto(
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Obtener costo unitario del repuesto
-        cursor.execute("SELECT costo_unitario FROM REPUESTO WHERE id_repuesto = :id_rep", {"id_rep": int(repuesto_id)})
+        cursor.execute("SELECT costo_unitario, stock_disponible FROM REPUESTO WHERE id_repuesto = :id_rep", {"id_rep": int(repuesto_id)})
         row = cursor.fetchone()
         if not row:
             return {"success": False, "error": f"Repuesto ID {repuesto_id} no encontrado."}
 
-        costo_unitario = float(row[0] or 0)
+        costo_unitario = _safe_float(row[0])
+        stock_disp = _safe_int(row[1])
+
+        if cantidad > stock_disp:
+            return {
+                "success": False,
+                "error": f"Stock insuficiente en almacén ({stock_disp} disponible(s), solicitado: {cantidad})."
+            }
+
         costo_total = round(cantidad * costo_unitario, 2)
 
         v_id = cursor.var(oracledb.NUMBER)
@@ -910,14 +1028,14 @@ def get_kpis_mantenimiento() -> Dict[str, Any]:
     if rows:
         r = rows[0]
         return {
-            "total_ordenes": int(r.get("TOTAL_ORDENES") or 0),
-            "en_ejecucion": int(r.get("ORDENES_EN_EJECUCION") or 0),
-            "programadas": int(r.get("ORDENES_PROGRAMADAS") or 0),
-            "completadas": int(r.get("ORDENES_COMPLETADAS") or 0),
-            "equipos_fuera_servicio": int(r.get("EQUIPOS_FUERA_SERVICIO") or 0),
-            "inspecciones_vencidas": int(r.get("INSPECCIONES_VENCIDAS") or 0),
-            "trenes_en_taller": int(r.get("TRENES_EN_TALLER") or 0),
-            "inversion_total": float(r.get("INVERSION_TOTAL") or 0.0)
+            "total_ordenes": _safe_int(r.get("TOTAL_ORDENES")),
+            "en_ejecucion": _safe_int(r.get("ORDENES_EN_EJECUCION")),
+            "programadas": _safe_int(r.get("ORDENES_PROGRAMADAS")),
+            "completadas": _safe_int(r.get("ORDENES_COMPLETADAS")),
+            "equipos_fuera_servicio": _safe_int(r.get("EQUIPOS_FUERA_SERVICIO")),
+            "inspecciones_vencidas": _safe_int(r.get("INSPECCIONES_VENCIDAS")),
+            "trenes_en_taller": _safe_int(r.get("TRENES_EN_TALLER")),
+            "inversion_total": _safe_float(r.get("INVERSION_TOTAL"))
         }
     return {
         "total_ordenes": 0, "en_ejecucion": 0, "programadas": 0,

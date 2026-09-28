@@ -31,7 +31,7 @@ class StatCard(CardWidget):
             top_layout.addWidget(self.icon_widget)
 
         self.lbl_top = CaptionLabel(title.upper(), self)
-        self.lbl_top.setStyleSheet("font-weight: 700; letter-spacing: 0.5px;")
+        self.lbl_top.setStyleSheet("font-weight: 700;")
         top_layout.addWidget(self.lbl_top)
         top_layout.addStretch(1)
 

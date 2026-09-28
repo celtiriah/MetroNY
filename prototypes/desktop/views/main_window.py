@@ -1,12 +1,11 @@
-"""
-Main Window Shell for the MetroNY Desktop Application.
-Manages the Fluent navigation sidebar, sub-interfaces, and title bar action buttons.
-"""
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from qfluentwidgets import (
     FluentWindow, FluentIcon as FIF, setTheme, Theme,
-    setThemeColor, TransparentToolButton, InfoBar, InfoBarPosition
+    setThemeColor, TransparentToolButton, InfoBar, InfoBarPosition, InfoBarIcon
 )
 
 from config import (
@@ -23,6 +22,7 @@ from views.m5_cards_interface import CardsInterface
 from views.m6_maintenance_interface import MaintenanceInterface
 from views.m7_incidents_interface import IncidentsInterface
 from views.queries_interface import QueriesInterface
+from views.components import NotificationTrayDialog
 
 
 class MetroFluentApp(FluentWindow):
@@ -30,6 +30,8 @@ class MetroFluentApp(FluentWindow):
         super().__init__()
         self.current_theme = "light"
         self._loaded_interfaces = set()
+        self.notifications_history: List[Dict[str, Any]] = []
+        self._setup_notification_interceptor()
         self.init_window()
         self.init_sub_interfaces()
         self.init_navigation()
@@ -82,34 +84,118 @@ class MetroFluentApp(FluentWindow):
         self.btn_sync.setToolTip("Actualizar Datos desde Oracle")
         self.btn_sync.clicked.connect(self.load_all_data)
 
+        self.btn_notifications = TransparentToolButton(FIF.RINGER, self)
+        self.btn_notifications.setToolTip("Bandeja de Notificaciones y Eventos")
+        self.btn_notifications.clicked.connect(self.show_notification_tray)
+
         self.btn_theme = TransparentToolButton(FIF.BRUSH, self)
         self.btn_theme.setToolTip("Alternar Tema Claro / Oscuro")
         self.btn_theme.clicked.connect(self.toggle_theme)
 
         # Insert prior to system window controls (min/max/close)
         self.titleBar.hBoxLayout.insertWidget(3, self.btn_sync)
-        self.titleBar.hBoxLayout.insertWidget(4, self.btn_theme)
+        self.titleBar.hBoxLayout.insertWidget(4, self.btn_notifications)
+        self.titleBar.hBoxLayout.insertWidget(5, self.btn_theme)
+
+    def _setup_notification_interceptor(self):
+        """
+        Intercepta globalmente todas las llamadas a InfoBar (success, error, warning, info)
+        para que cualquier módulo (M1-M7, Consultas, Dashboard) automáticamente:
+        1. Extienda su duración (6 a 10s).
+        2. Se registre en el historial de la bandeja de notificaciones.
+        """
+        original_new = InfoBar.new
+        app_ref = self
+
+        @classmethod
+        def hooked_infobar_new(
+            cls, icon, title, content, orient=Qt.Orientation.Horizontal,
+            isClosable=True, duration=1000, position=InfoBarPosition.TOP_RIGHT, parent=None
+        ):
+            icon_type_map = {
+                InfoBarIcon.SUCCESS: "success",
+                InfoBarIcon.WARNING: "warning",
+                InfoBarIcon.ERROR: "error",
+                InfoBarIcon.INFORMATION: "info",
+            }
+            msg_type = icon_type_map.get(icon, "info")
+
+            min_durations = {
+                "info": 6000,
+                "success": 6000,
+                "warning": 8000,
+                "error": 10000,
+            }
+            effective_duration = max(duration, min_durations.get(msg_type, 6000))
+
+            now_str = datetime.now().strftime("%H:%M:%S")
+            app_ref.notifications_history.append({
+                "time": now_str,
+                "type": msg_type,
+                "title": str(title),
+                "content": str(content),
+                "duration": effective_duration,
+            })
+
+            target_parent = parent if parent is not None else app_ref
+
+            return original_new(
+                icon, title, content, orient=orient,
+                isClosable=isClosable, duration=effective_duration,
+                position=position, parent=target_parent
+            )
+
+        setattr(InfoBar, "new", hooked_infobar_new)
+
+    def notify(self, title: str, content: str, msg_type: str = "info", duration: Optional[int] = None):
+        """
+        Emite una notificación emergente con duración extendida y registro centralizado
+        en el historial de la bandeja mediante el interceptor global.
+        """
+        if duration is None:
+            if msg_type in ("error",):
+                duration = 10000
+            elif msg_type in ("warning",):
+                duration = 8000
+            else:
+                duration = 6000
+
+        if msg_type == "success":
+            InfoBar.success(title=title, content=content, parent=self, position=InfoBarPosition.TOP_RIGHT, duration=duration)
+        elif msg_type == "warning":
+            InfoBar.warning(title=title, content=content, parent=self, position=InfoBarPosition.TOP_RIGHT, duration=duration)
+        elif msg_type == "error":
+            InfoBar.error(title=title, content=content, parent=self, position=InfoBarPosition.TOP_RIGHT, duration=duration)
+        else:
+            InfoBar.info(title=title, content=content, parent=self, position=InfoBarPosition.TOP_RIGHT, duration=duration)
+
+    def show_notification_tray(self):
+        """Abre la bandeja modal de historial de notificaciones y alertas."""
+        dlg = NotificationTrayDialog(self.notifications_history, on_clear_callback=self.clear_notifications, parent=self)
+        dlg.exec()
+
+    def clear_notifications(self):
+        """Limpia el historial de la bandeja de notificaciones."""
+        self.notifications_history.clear()
 
     def toggle_theme(self):
         if self.current_theme == "light":
             self.current_theme = "dark"
             setTheme(Theme.DARK)
-            InfoBar.info(
+            self.notify(
                 title="Modo Oscuro activado",
                 content="La interfaz se ha cambiado a Tema Oscuro.",
-                parent=self,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=2000
+                msg_type="info",
+                duration=4000
             )
         else:
             self.current_theme = "light"
             setTheme(Theme.LIGHT)
-            InfoBar.info(
+            self.notify(
                 title="Modo Claro activado",
                 content="La interfaz se ha cambiado a Tema Claro.",
-                parent=self,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=2000
+                msg_type="info",
+                duration=4000
             )
 
     def on_current_interface_changed(self, index: int):
@@ -135,12 +221,11 @@ class MetroFluentApp(FluentWindow):
             self._loaded_interfaces.add(self.dashboard_interface)
         except Exception as e:
             self.dashboard_interface.status_card.set_error(str(e))
-            InfoBar.error(
+            self.notify(
                 title="Fallo de Conexión a Oracle",
                 content=str(e),
-                parent=self,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000
+                msg_type="error",
+                duration=10000
             )
         finally:
             if QApplication.overrideCursor() is not None:
@@ -170,12 +255,11 @@ class MetroFluentApp(FluentWindow):
                 self.incidents_interface.load_incidents_data()
             self._loaded_interfaces.add(widget)
         except Exception as e:
-            InfoBar.error(
+            self.notify(
                 title="Error al Cargar Módulo",
                 content=str(e),
-                parent=self,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=3500
+                msg_type="error",
+                duration=8000
             )
         finally:
             if QApplication.overrideCursor() is not None:
@@ -190,20 +274,18 @@ class MetroFluentApp(FluentWindow):
             if current is not None and current is not self.dashboard_interface:
                 self.load_interface_data(current)
 
-            InfoBar.success(
+            self.notify(
                 title="Datos Sincronizados",
                 content="Módulos actualizados correctamente desde Oracle Database.",
-                parent=self,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=2500
+                msg_type="success",
+                duration=6000
             )
         except Exception as e:
-            InfoBar.error(
+            self.notify(
                 title="Fallo de Sincronización",
                 content=str(e),
-                parent=self,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000
+                msg_type="error",
+                duration=10000
             )
         finally:
             if QApplication.overrideCursor() is not None:

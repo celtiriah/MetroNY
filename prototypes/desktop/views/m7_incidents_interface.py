@@ -9,6 +9,7 @@ Cumple estrictamente con los 7 requerimientos del enunciado oficial y las reglas
 6. Calculo exacto de duracion de eventos e impacto en pasajeros.
 7. Metricas estadisticas agregadas de red.
 """
+import html
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -16,7 +17,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
-    QLabel, QSplitter
+    QLabel, QSplitter, QAbstractItemView
 )
 
 from qfluentwidgets import (
@@ -28,6 +29,9 @@ from qfluentwidgets import (
 )
 
 from services import m7_incidents_service, actions_service
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -115,10 +119,19 @@ class RegistrarIncidenteDialog(MessageBoxBase):
         self.txt_desc.setPlaceholderText("Descripción técnica breve de la contingencia...")
         form.addRow("Descripción del Hecho:", self.txt_desc)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Registrar Incidente")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(520)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
 
         self.on_tipo_elem_changed("ESTACION")
 
@@ -146,10 +159,31 @@ class RegistrarIncidenteDialog(MessageBoxBase):
                 self.combo_elem.addItem(f"Viaje {v['NUMERO_VIAJE']} ({v['FECHA']}) - [{v['ESTADO']}]", userData=int(v['ID_VIAJE']))
 
     def validate(self) -> bool:
-        if not self.txt_desc.text().strip():
+        if self.combo_reportado.currentData() is None:
+            self.lbl_error.setText("Debe seleccionar el personal que reporta la eventualidad.")
+            self.lbl_error.show()
+            return False
+        if self.combo_elem.currentData() is None:
+            self.lbl_error.setText("Debe seleccionar un activo específico afectado.")
+            self.lbl_error.show()
+            return False
+        desc = self.txt_desc.text().strip()
+        if len(desc) < 3:
+            self.lbl_error.setText("La descripción del hecho debe contener al menos 3 caracteres.")
+            self.lbl_error.show()
             self.txt_desc.setFocus()
             return False
+        if len(desc) > 500:
+            self.lbl_error.setText("La descripción no puede exceder 500 caracteres.")
+            self.lbl_error.show()
+            self.txt_desc.setFocus()
+            return False
+        self.lbl_error.hide()
         return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 class CerrarIncidenteDialog(MessageBoxBase):
@@ -195,15 +229,58 @@ class CerrarIncidenteDialog(MessageBoxBase):
         )
         form.addRow(lbl_notice)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Confirmar Cierre")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(500)
 
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
     def validate(self) -> bool:
-        if not self.txt_causa.text().strip() or not self.txt_acciones.text().strip():
+        causa = self.txt_causa.text().strip()
+        if len(causa) < 3:
+            self.lbl_error.setText("La causa identificada debe contener al menos 3 caracteres.")
+            self.lbl_error.show()
+            self.txt_causa.setFocus()
             return False
+        if len(causa) > 300:
+            self.lbl_error.setText("La causa identificada no puede exceder 300 caracteres.")
+            self.lbl_error.show()
+            self.txt_causa.setFocus()
+            return False
+
+        acciones = self.txt_acciones.text().strip()
+        if len(acciones) < 3:
+            self.lbl_error.setText("Las acciones realizadas deben contener al menos 3 caracteres.")
+            self.lbl_error.show()
+            self.txt_acciones.setFocus()
+            return False
+        if len(acciones) > 500:
+            self.lbl_error.setText("Las acciones realizadas no pueden exceder 500 caracteres.")
+            self.lbl_error.show()
+            self.txt_acciones.setFocus()
+            return False
+
+        f_fin = self.txt_fecha_fin.text().strip()
+        if not f_fin:
+            self.lbl_error.setText("Debe especificar la fecha y hora de cierre.")
+            self.lbl_error.show()
+            self.txt_fecha_fin.setFocus()
+            return False
+
+        self.lbl_error.hide()
         return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 class AsociarElementoDialog(MessageBoxBase):
@@ -234,10 +311,19 @@ class AsociarElementoDialog(MessageBoxBase):
         ])
         form.addRow("Afectación Operativa:", self.combo_afectacion)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Vincular Elemento")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(480)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
 
         self.on_tipo_changed("ESTACION")
 
@@ -263,6 +349,18 @@ class AsociarElementoDialog(MessageBoxBase):
             viajes = execute_query("SELECT id_viaje, numero_viaje, fecha, estado FROM VIAJE_PROGRAMADO WHERE estado IN ('Programado', 'En Abordaje', 'En Curso') ORDER BY id_viaje DESC FETCH FIRST 20 ROWS ONLY")["rows"]
             for v in viajes:
                 self.combo_entidad.addItem(f"Viaje {v['NUMERO_VIAJE']} ({v['FECHA']}) - [{v['ESTADO']}]", userData=int(v['ID_VIAJE']))
+
+    def validate(self) -> bool:
+        if self.combo_entidad.currentData() is None:
+            self.lbl_error.setText("Debe seleccionar un elemento de red válido para asociar.")
+            self.lbl_error.show()
+            return False
+        self.lbl_error.hide()
+        return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 class ModificarAfectacionDialog(MessageBoxBase):
@@ -292,10 +390,31 @@ class ModificarAfectacionDialog(MessageBoxBase):
         self.combo_afectacion.setCurrentText(self.afectacion_actual)
         form.addRow("Nueva Afectación:", self.combo_afectacion)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Actualizar")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(440)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
+    def validate(self) -> bool:
+        if not self.combo_afectacion.currentText().strip():
+            self.lbl_error.setText("Debe seleccionar un tipo de afectación.")
+            self.lbl_error.show()
+            return False
+        self.lbl_error.hide()
+        return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 # ==============================================================================
@@ -362,6 +481,7 @@ class IncidentsInterface(QWidget):
         self.init_tab_metricas()
 
         main_layout.addWidget(self.stack_views, stretch=1)
+        self.refresh_incidentes()
 
     def showEvent(self, a0):
         super().showEvent(a0)
@@ -461,20 +581,10 @@ class IncidentsInterface(QWidget):
             "Nº Incidente", "Tipo", "Severidad", "Elementos Afectados",
             "Inicio", "Duración", "Estado", "Reportado Por", "Pasajeros Est."
         ])
-        self.table_incidentes.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.table_incidentes.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
+        self.table_incidentes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_incidentes.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        header = self.table_incidentes.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_incidentes)
 
         self.table_incidentes.itemSelectionChanged.connect(self.on_incidente_selected)
         v_layout.addWidget(self.table_incidentes, stretch=1)
@@ -505,18 +615,24 @@ class IncidentsInterface(QWidget):
             estado = _safe_str(row.get("ESTADO"))
             rep = _safe_str(row.get("REPORTADO_POR"))
             pax = _safe_str(row.get("PASAJEROS_AFECTADOS_ESTIMADO"))
+            desc = _safe_str(row.get("DESCRIPCION"))
 
-            self.table_incidentes.setItem(r, 0, QTableWidgetItem(num))
+            it_num = QTableWidgetItem(num)
+            it_num.setToolTip(html.escape(desc))
+            self.table_incidentes.setItem(r, 0, it_num)
             self.table_incidentes.setItem(r, 1, QTableWidgetItem(tipo))
-            self.table_incidentes.setItem(r, 2, QTableWidgetItem(sev_val))
-            self.table_incidentes.setItem(r, 3, QTableWidgetItem(elem))
+            self.table_incidentes.setCellWidget(r, 2, StatusBadge(sev_val, self.table_incidentes))
+            it_elem = QTableWidgetItem(elem)
+            it_elem.setToolTip(html.escape(elem))
+            self.table_incidentes.setItem(r, 3, it_elem)
             self.table_incidentes.setItem(r, 4, QTableWidgetItem(f_ini))
             self.table_incidentes.setItem(r, 5, QTableWidgetItem(dur_str))
-            self.table_incidentes.setItem(r, 6, QTableWidgetItem(estado))
+            self.table_incidentes.setCellWidget(r, 6, StatusBadge(estado, self.table_incidentes))
             self.table_incidentes.setItem(r, 7, QTableWidgetItem(rep))
             self.table_incidentes.setItem(r, 8, QTableWidgetItem(pax))
 
         self.table_incidentes.blockSignals(False)
+        auto_fit_table_columns(self.table_incidentes)
         self.refresh_kpis()
 
     def refresh_kpis(self):
@@ -578,6 +694,11 @@ class IncidentsInterface(QWidget):
             InfoBar.warning("Selección Requerida", "Seleccione un incidente de la tabla.", parent=self.window(), duration=3000)
             return
 
+        incidente = next((i for i in self.incidents_cache if _safe_int(i.get("ID_INCIDENTE")) == self.selected_incident_id), None)
+        if incidente and _safe_str(incidente.get("ESTADO")) == "Cerrado":
+            InfoBar.warning("Operación no Permitida", "El incidente ya se encuentra cerrado.", parent=self.window(), duration=3500)
+            return
+
         res = m7_incidents_service.cambiar_estado(self.selected_incident_id, "En Atención")
         if res.get("success"):
             InfoBar.success("Estado Actualizado", "El incidente ha pasado a estado 'En Atención'.", parent=self.window(), duration=3000)
@@ -594,12 +715,12 @@ class IncidentsInterface(QWidget):
         if not incidente:
             return
 
+        if _safe_str(incidente.get("ESTADO")) == "Cerrado":
+            InfoBar.warning("Incidente ya Cerrado", "Este incidente ya ha sido resuelto y cerrado previamente.", parent=self.window(), duration=3500)
+            return
+
         dialog = CerrarIncidenteDialog(incidente, self.window())
         if dialog.exec():
-            if not dialog.validate():
-                InfoBar.warning("Validación", "Complete la causa identificada y las acciones realizadas.", parent=self.window(), duration=3000)
-                return
-
             res = m7_incidents_service.cerrar_incidente(
                 id_incidente=self.selected_incident_id,
                 causa_identificada=dialog.txt_causa.text(),
@@ -617,6 +738,11 @@ class IncidentsInterface(QWidget):
     def handle_cancelar_viajes_directo(self):
         if not self.selected_incident_id:
             InfoBar.warning("Selección Requerida", "Seleccione un incidente para cancelar sus viajes afectados.", parent=self.window(), duration=3000)
+            return
+
+        incidente = next((i for i in self.incidents_cache if _safe_int(i.get("ID_INCIDENTE")) == self.selected_incident_id), None)
+        if incidente and _safe_str(incidente.get("ESTADO")) == "Cerrado":
+            InfoBar.warning("Operación no Permitida", "No se pueden despachar cancelaciones para un incidente que ya está cerrado.", parent=self.window(), duration=3500)
             return
 
         box = MessageBox(
@@ -673,15 +799,9 @@ class IncidentsInterface(QWidget):
         self.table_elementos.setHorizontalHeaderLabels([
             "Tipo de Elemento (Arco)", "Elemento de Red Afectado", "Tipo de Afectación", "ID Asociación"
         ])
-        self.table_elementos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.table_elementos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-
-        header = self.table_elementos.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_elementos.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_elementos.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        configure_interactive_table(self.table_elementos)
 
         v_layout.addWidget(self.table_elementos, stretch=1)
 
@@ -727,16 +847,24 @@ class IncidentsInterface(QWidget):
             it_tipo = QTableWidgetItem(tipo)
             it_tipo.setData(Qt.ItemDataRole.UserRole, id_ie)
             self.table_elementos.setItem(r, 0, it_tipo)
-            self.table_elementos.setItem(r, 1, QTableWidgetItem(nom))
-            self.table_elementos.setItem(r, 2, QTableWidgetItem(af))
+            it_nom = QTableWidgetItem(nom)
+            it_nom.setToolTip(html.escape(nom))
+            self.table_elementos.setItem(r, 1, it_nom)
+            self.table_elementos.setCellWidget(r, 2, StatusBadge(af, self.table_elementos))
             self.table_elementos.setItem(r, 3, QTableWidgetItem(str(id_ie)))
 
         self.table_elementos.blockSignals(False)
+        auto_fit_table_columns(self.table_elementos)
 
     def handle_asociar_elemento(self):
         id_inc = self.combo_elem_incidente.currentData()
         if not id_inc:
             InfoBar.warning("Incidente Requerido", "Seleccione un incidente primero.", parent=self.window(), duration=3000)
+            return
+
+        inc_text = self.combo_elem_incidente.currentText()
+        if "[Cerrado]" in inc_text:
+            InfoBar.warning("Operación no Permitida", "No se pueden asociar elementos a un incidente cerrado.", parent=self.window(), duration=3500)
             return
 
         dialog = AsociarElementoDialog(self.window())
@@ -755,6 +883,11 @@ class IncidentsInterface(QWidget):
                 InfoBar.error("Error Arco Exclusivo", res.get("error", ""), parent=self.window(), duration=5000)
 
     def handle_modificar_afectacion(self):
+        inc_text = self.combo_elem_incidente.currentText()
+        if "[Cerrado]" in inc_text:
+            InfoBar.warning("Operación no Permitida", "No se puede modificar la afectación de un incidente cerrado.", parent=self.window(), duration=3500)
+            return
+
         selected = self.table_elementos.selectedItems()
         if not selected:
             InfoBar.warning("Selección Requerida", "Seleccione un elemento de la tabla para modificar su afectación.", parent=self.window(), duration=3000)
@@ -782,6 +915,11 @@ class IncidentsInterface(QWidget):
                 InfoBar.error("Error", res.get("error", ""), parent=self.window(), duration=4000)
 
     def handle_desvincular_elemento(self):
+        inc_text = self.combo_elem_incidente.currentText()
+        if "[Cerrado]" in inc_text:
+            InfoBar.warning("Operación no Permitida", "No se pueden desvincular elementos de un incidente cerrado.", parent=self.window(), duration=3500)
+            return
+
         selected = self.table_elementos.selectedItems()
         if not selected:
             InfoBar.warning("Selección Requerida", "Seleccione un elemento de la tabla para desvincular.", parent=self.window(), duration=3000)
@@ -841,18 +979,8 @@ class IncidentsInterface(QWidget):
         self.table_viajes_afectados.setHorizontalHeaderLabels([
             "Nº Viaje", "Línea", "Ruta", "Tren Asignado", "Conductor", "Fecha", "Horario", "Estado Actual"
         ])
-        self.table_viajes_afectados.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-
-        header = self.table_viajes_afectados.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_viajes_afectados.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        configure_interactive_table(self.table_viajes_afectados)
 
         info_layout.addWidget(self.table_viajes_afectados, stretch=1)
         v_layout.addWidget(card_info, stretch=1)
@@ -869,8 +997,9 @@ class IncidentsInterface(QWidget):
             num = _safe_str(inc.get("NUMERO_INCIDENTE"))
             tipo = _safe_str(inc.get("TIPO"))
             sev = _safe_str(inc.get("NIVEL_SEVERIDAD"))
+            est = _safe_str(inc.get("ESTADO"))
             id_inc = _safe_int(inc.get("ID_INCIDENTE"))
-            self.combo_despacho_inc.addItem(f"{num} - {tipo} (Severidad {sev})", userData=id_inc)
+            self.combo_despacho_inc.addItem(f"{num} - {tipo} [{est}] (Severidad {sev})", userData=id_inc)
 
         if prev_id:
             for idx in range(self.combo_despacho_inc.count()):
@@ -893,7 +1022,8 @@ class IncidentsInterface(QWidget):
         self.table_viajes_afectados.setRowCount(len(viajes))
         for r, row in enumerate(viajes):
             num_v = _safe_str(row.get("NUMERO_VIAJE"))
-            lin = f"Línea {_safe_str(row.get('LINEA_CODIGO'))}"
+            lin_cod = _safe_str(row.get('LINEA_CODIGO'))
+            lin_col = _safe_str(row.get('COLOR_HEX') or row.get('COLOR_LINEA') or '#0039A6')
             rut = f"Ruta {_safe_str(row.get('RUTA_CODIGO'))}"
             tren = _safe_str(row.get("TREN_CODIGO"))
             cond = _safe_str(row.get("CONDUCTOR"))
@@ -902,21 +1032,27 @@ class IncidentsInterface(QWidget):
             est = _safe_str(row.get("ESTADO"))
 
             self.table_viajes_afectados.setItem(r, 0, QTableWidgetItem(num_v))
-            self.table_viajes_afectados.setItem(r, 1, QTableWidgetItem(lin))
+            self.table_viajes_afectados.setCellWidget(r, 1, LineColorChip(lin_cod, lin_col, f"Línea {lin_cod}", self.table_viajes_afectados))
             self.table_viajes_afectados.setItem(r, 2, QTableWidgetItem(rut))
             self.table_viajes_afectados.setItem(r, 3, QTableWidgetItem(tren))
             self.table_viajes_afectados.setItem(r, 4, QTableWidgetItem(cond))
             self.table_viajes_afectados.setItem(r, 5, QTableWidgetItem(f))
             self.table_viajes_afectados.setItem(r, 6, QTableWidgetItem(hor))
-            self.table_viajes_afectados.setItem(r, 7, QTableWidgetItem(est))
+            self.table_viajes_afectados.setCellWidget(r, 7, StatusBadge(est, self.table_viajes_afectados))
 
         self.table_viajes_afectados.blockSignals(False)
+        auto_fit_table_columns(self.table_viajes_afectados)
         self.lbl_despacho_summary.setText(f"Se identificaron {len(viajes)} viaje(s) que intersectan con el sector afectado.")
 
     def handle_ejecutar_cancelacion(self):
         id_inc = self.combo_despacho_inc.currentData()
         if not id_inc:
             InfoBar.warning("Incidente Requerido", "Seleccione un incidente para despachar cancelaciones.", parent=self.window(), duration=3000)
+            return
+
+        inc_text = self.combo_despacho_inc.currentText()
+        if "[Cerrado]" in inc_text:
+            InfoBar.warning("Operación no Permitida", "No se pueden despachar cancelaciones para un incidente que ya está cerrado.", parent=self.window(), duration=3500)
             return
 
         box = MessageBox("Confirmar Cancelación", "¿Desea cancelar automáticamente todos los viajes intersectados mediante SP_CANCELAR_VIAJES_AFECTADOS?", self.window())
@@ -961,16 +1097,8 @@ class IncidentsInterface(QWidget):
         self.table_bitacora.setHorizontalHeaderLabels([
             "ID Bitácora", "Fecha / Hora", "Operación", "ID Incidente", "Usuario Oracle", "Descripción de Auditoría (Trigger)"
         ])
-        self.table_bitacora.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-
-        header = self.table_bitacora.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table_bitacora.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        configure_interactive_table(self.table_bitacora)
 
         v_layout.addWidget(self.table_bitacora, stretch=1)
         self.stack_views.addWidget(tab_widget)
@@ -991,12 +1119,15 @@ class IncidentsInterface(QWidget):
 
             self.table_bitacora.setItem(r, 0, QTableWidgetItem(id_b))
             self.table_bitacora.setItem(r, 1, QTableWidgetItem(fh))
-            self.table_bitacora.setItem(r, 2, QTableWidgetItem(op))
+            self.table_bitacora.setCellWidget(r, 2, StatusBadge(op, self.table_bitacora))
             self.table_bitacora.setItem(r, 3, QTableWidgetItem(reg))
             self.table_bitacora.setItem(r, 4, QTableWidgetItem(usr))
-            self.table_bitacora.setItem(r, 5, QTableWidgetItem(desc))
+            it_desc = QTableWidgetItem(desc)
+            it_desc.setToolTip(html.escape(desc))
+            self.table_bitacora.setItem(r, 5, it_desc)
 
         self.table_bitacora.blockSignals(False)
+        auto_fit_table_columns(self.table_bitacora)
 
     # ==========================================================================
     # PESTANA 5: METRICAS Y RED
@@ -1018,11 +1149,8 @@ class IncidentsInterface(QWidget):
         self.table_stats_sev = TableWidget(card_sev)
         self.table_stats_sev.setColumnCount(2)
         self.table_stats_sev.setHorizontalHeaderLabels(["Severidad", "Total Incidentes"])
-        self.table_stats_sev.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        h_sev = self.table_stats_sev.horizontalHeader()
-        if h_sev is not None:
-            h_sev.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            h_sev.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_stats_sev.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        configure_interactive_table(self.table_stats_sev)
         sev_layout.addWidget(self.table_stats_sev)
         splitter.addWidget(card_sev)
 
@@ -1034,11 +1162,8 @@ class IncidentsInterface(QWidget):
         self.table_stats_tipo = TableWidget(card_tipo)
         self.table_stats_tipo.setColumnCount(2)
         self.table_stats_tipo.setHorizontalHeaderLabels(["Tipo de Falla / Contingencia", "Total"])
-        self.table_stats_tipo.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        h_tipo = self.table_stats_tipo.horizontalHeader()
-        if h_tipo is not None:
-            h_tipo.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            h_tipo.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_stats_tipo.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        configure_interactive_table(self.table_stats_tipo)
         tipo_layout.addWidget(self.table_stats_tipo)
         splitter.addWidget(card_tipo)
 
@@ -1050,11 +1175,8 @@ class IncidentsInterface(QWidget):
         self.table_stats_est = TableWidget(card_est)
         self.table_stats_est.setColumnCount(2)
         self.table_stats_est.setHorizontalHeaderLabels(["Estado", "Total"])
-        self.table_stats_est.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        h_est = self.table_stats_est.horizontalHeader()
-        if h_est is not None:
-            h_est.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            h_est.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_stats_est.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        configure_interactive_table(self.table_stats_est)
         est_layout.addWidget(self.table_stats_est)
         splitter.addWidget(card_est)
 
@@ -1072,25 +1194,31 @@ class IncidentsInterface(QWidget):
         self.table_stats_sev.blockSignals(True)
         self.table_stats_sev.setRowCount(len(stats["por_severidad"]))
         for r, row in enumerate(stats["por_severidad"]):
-            self.table_stats_sev.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NIVEL_SEVERIDAD"))))
+            sev_val = _safe_str(row.get("NIVEL_SEVERIDAD"))
+            self.table_stats_sev.setCellWidget(r, 0, StatusBadge(sev_val, self.table_stats_sev))
             self.table_stats_sev.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
         self.table_stats_sev.blockSignals(False)
+        auto_fit_table_columns(self.table_stats_sev)
 
         # Tipo
         self.table_stats_tipo.blockSignals(True)
         self.table_stats_tipo.setRowCount(len(stats["por_tipo"]))
         for r, row in enumerate(stats["por_tipo"]):
-            self.table_stats_tipo.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("TIPO"))))
+            tipo_val = _safe_str(row.get("TIPO"))
+            self.table_stats_tipo.setCellWidget(r, 0, StatusBadge(tipo_val, self.table_stats_tipo))
             self.table_stats_tipo.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
         self.table_stats_tipo.blockSignals(False)
+        auto_fit_table_columns(self.table_stats_tipo)
 
         # Estado
         self.table_stats_est.blockSignals(True)
         self.table_stats_est.setRowCount(len(stats["por_estado"]))
         for r, row in enumerate(stats["por_estado"]):
-            self.table_stats_est.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("ESTADO"))))
+            est_val = _safe_str(row.get("ESTADO"))
+            self.table_stats_est.setCellWidget(r, 0, StatusBadge(est_val, self.table_stats_est))
             self.table_stats_est.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
         self.table_stats_est.blockSignals(False)
+        auto_fit_table_columns(self.table_stats_est)
 
     # ==========================================================================
     # CARGA GLOBAL DESDE MAIN WINDOW

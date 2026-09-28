@@ -27,6 +27,9 @@ from qfluentwidgets import (
 )
 
 from services import m4_staff_service
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -178,8 +181,87 @@ class EmpleadoDialog(MessageBoxBase):
 
         self.viewLayout.addLayout(form)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        self.viewLayout.addWidget(self.lbl_error)
+
         self.yesButton.setText("Guardar Empleado" if self.es_edicion else "Registrar Empleado")
         self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(440)
+
+    def validate(self) -> bool:
+        """
+        Valida rigurosamente los datos del empleado antes de procesar:
+        - Nombre completo obligatorio
+        - Teléfono de contacto obligatorio (comunicación operativa y de emergencia)
+        - Mayoría de edad: fecha de nacimiento obligatoria y mínimo 18 años cumplidos
+        - Salario positivo > 0
+        - Formatos de fecha YYYY-MM-DD
+        """
+        nombre = self.txt_nombre.text().strip()
+        if not nombre:
+            self.lbl_error.setText("El nombre completo del empleado es obligatorio.")
+            self.lbl_error.show()
+            self.txt_nombre.setFocus()
+            return False
+
+        tel = self.txt_tel.text().strip()
+        if not tel:
+            self.lbl_error.setText("El teléfono de contacto es obligatorio para el personal operativo (emergencias).")
+            self.lbl_error.show()
+            self.txt_tel.setFocus()
+            return False
+
+        correo = self.txt_correo.text().strip()
+        if correo and "@" not in correo:
+            self.lbl_error.setText("El correo electrónico debe contener un formato válido con '@'.")
+            self.lbl_error.show()
+            self.txt_correo.setFocus()
+            return False
+
+        salario = self.spin_salario.value()
+        if salario <= 0.0:
+            self.lbl_error.setText("El salario anual debe ser un valor positivo mayor a 0.")
+            self.lbl_error.show()
+            self.spin_salario.setFocus()
+            return False
+
+        fnac_str = self.txt_fnac.text().strip()
+        if not fnac_str:
+            self.lbl_error.setText("La fecha de nacimiento es obligatoria (formato YYYY-MM-DD).")
+            self.lbl_error.show()
+            self.txt_fnac.setFocus()
+            return False
+
+        try:
+            d_nac = datetime.strptime(fnac_str, "%Y-%m-%d").date()
+            hoy = date.today()
+            edad = hoy.year - d_nac.year - ((hoy.month, hoy.day) < (d_nac.month, d_nac.day))
+            if edad < 18:
+                self.lbl_error.setText(f"El empleado debe tener al menos 18 años cumplidos (edad calculada: {edad} años).")
+                self.lbl_error.show()
+                self.txt_fnac.setFocus()
+                return False
+        except ValueError:
+            self.lbl_error.setText("Formato inválido en fecha de nacimiento. Utilice YYYY-MM-DD.")
+            self.lbl_error.show()
+            self.txt_fnac.setFocus()
+            return False
+
+        fcont_str = self.txt_fcont.text().strip()
+        if fcont_str:
+            try:
+                datetime.strptime(fcont_str, "%Y-%m-%d")
+            except ValueError:
+                self.lbl_error.setText("Formato inválido en fecha de contratación. Utilice YYYY-MM-DD.")
+                self.lbl_error.show()
+                self.txt_fcont.setFocus()
+                return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -297,8 +379,87 @@ class CertificacionDialog(MessageBoxBase):
             modelos_layout.addWidget(chk)
         self.viewLayout.addLayout(modelos_layout)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        self.viewLayout.addWidget(self.lbl_error)
+
         self.yesButton.setText("Guardar Certificación" if self.es_edicion else "Registrar Certificación")
         self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(440)
+
+    def validate(self) -> bool:
+        """
+        Valida que la certificación cumpla con las reglas operativas y de integridad:
+        - Empleado seleccionado
+        - Fechas válidas y fecha_vencimiento >= fecha_emision
+        - Inmutabilidad de fechas en certificaciones vencidas o revocadas
+        """
+        if self.combo_emp.currentData() is None:
+            self.lbl_error.setText("Debe seleccionar un empleado titular de la certificación.")
+            self.lbl_error.show()
+            self.combo_emp.setFocus()
+            return False
+
+        tipo = self.combo_tipo.currentText().strip()
+        if not tipo:
+            self.lbl_error.setText("El tipo de certificación técnica es obligatorio.")
+            self.lbl_error.show()
+            return False
+
+        f_emi_str = self.txt_f_emi.text().strip()
+        f_venc_str = self.txt_f_venc.text().strip()
+
+        if not f_emi_str:
+            self.lbl_error.setText("La fecha de emisión es obligatoria (formato YYYY-MM-DD).")
+            self.lbl_error.show()
+            self.txt_f_emi.setFocus()
+            return False
+
+        if not f_venc_str:
+            self.lbl_error.setText("La fecha de vencimiento es obligatoria (formato YYYY-MM-DD).")
+            self.lbl_error.show()
+            self.txt_f_venc.setFocus()
+            return False
+
+        try:
+            d_emi = datetime.strptime(f_emi_str, "%Y-%m-%d").date()
+        except ValueError:
+            self.lbl_error.setText("Formato inválido en fecha de emisión. Utilice YYYY-MM-DD.")
+            self.lbl_error.show()
+            self.txt_f_emi.setFocus()
+            return False
+
+        try:
+            d_venc = datetime.strptime(f_venc_str, "%Y-%m-%d").date()
+        except ValueError:
+            self.lbl_error.setText("Formato inválido en fecha de vencimiento. Utilice YYYY-MM-DD.")
+            self.lbl_error.show()
+            self.txt_f_venc.setFocus()
+            return False
+
+        if d_venc < d_emi:
+            self.lbl_error.setText("La fecha de vencimiento no puede ser anterior a la fecha de emisión.")
+            self.lbl_error.show()
+            self.txt_f_venc.setFocus()
+            return False
+
+        # Inmutabilidad de fechas en histórico vencido o revocado
+        if self.es_edicion and self.cert_data:
+            est_orig = str(self.cert_data.get("ESTADO", ""))
+            if est_orig in ("Vencida", "Revocada"):
+                emi_orig = str(self.cert_data.get("FECHA_EMISION", ""))
+                venc_orig = str(self.cert_data.get("FECHA_VENCIMIENTO", ""))
+                if (f_emi_str != emi_orig) or (f_venc_str != venc_orig):
+                    self.lbl_error.setText(
+                        f"Operación rechazada: No se permite modificar las fechas de una certificación en estado '{est_orig}' (registro histórico inmutable)."
+                    )
+                    self.lbl_error.show()
+                    return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         return {
@@ -397,8 +558,88 @@ class TurnoDialog(MessageBoxBase):
 
         self.viewLayout.addLayout(form)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        self.viewLayout.addWidget(self.lbl_error)
+
         self.yesButton.setText("Guardar Turno" if self.es_edicion else "Programar Turno")
         self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(440)
+
+    def validate(self) -> bool:
+        """
+        Valida que el turno programado cumpla con los estándares de seguridad y descanso:
+        - Empleado seleccionado
+        - Fecha válida
+        - Horas válidas y hora_fin > hora_inicio
+        - Duración continua máxima de 16 horas
+        - Ausencia de traslapes con otros turnos del mismo empleado
+        """
+        emp_id = self.combo_emp.currentData()
+        if emp_id is None:
+            self.lbl_error.setText("Debe seleccionar un empleado para programar el turno.")
+            self.lbl_error.show()
+            self.combo_emp.setFocus()
+            return False
+
+        f_str = self.txt_fecha.text().strip()
+        if not f_str:
+            self.lbl_error.setText("La fecha del turno es obligatoria (formato YYYY-MM-DD).")
+            self.lbl_error.show()
+            self.txt_fecha.setFocus()
+            return False
+
+        try:
+            datetime.strptime(f_str, "%Y-%m-%d")
+        except ValueError:
+            self.lbl_error.setText("Formato inválido en fecha de turno. Utilice YYYY-MM-DD.")
+            self.lbl_error.show()
+            self.txt_fecha.setFocus()
+            return False
+
+        h_ini_str = self.txt_h_ini.text().strip()
+        h_fin_str = self.txt_h_fin.text().strip()
+
+        if not h_ini_str or not h_fin_str:
+            self.lbl_error.setText("Las horas de inicio y fin son obligatorias (formato HH:MI).")
+            self.lbl_error.show()
+            return False
+
+        try:
+            t_ini = datetime.strptime(h_ini_str, "%H:%M")
+            t_fin = datetime.strptime(h_fin_str, "%H:%M")
+        except ValueError:
+            self.lbl_error.setText("Formato inválido en horas del turno. Utilice formato HH:MI (ej. 08:30).")
+            self.lbl_error.show()
+            return False
+
+        if t_fin <= t_ini:
+            self.lbl_error.setText("La hora de fin debe ser posterior a la hora de inicio (no se permiten turnos invertidos).")
+            self.lbl_error.show()
+            self.txt_h_fin.setFocus()
+            return False
+
+        duracion_horas = (t_fin - t_ini).total_seconds() / 3600.0
+        if duracion_horas > 16.0:
+            self.lbl_error.setText(f"La duración ({duracion_horas:.1f} h) excede el límite máximo de 16 horas continuas (normativa MTA).")
+            self.lbl_error.show()
+            self.txt_h_fin.setFocus()
+            return False
+
+        excl_id = _safe_int(self.turno_data.get("ID_TURNO")) if self.es_edicion and self.turno_data else None
+        conflicto = m4_staff_service.validar_traslape_turno(int(emp_id), f_str, h_ini_str, h_fin_str, excluir_id_turno=excl_id)
+        if conflicto:
+            self.lbl_error.setText(
+                f"Conflicto de traslape: El empleado ya tiene asignado el turno {conflicto.get('CODIGO_TURNO', '')} "
+                f"({conflicto.get('INI', '')} - {conflicto.get('FIN', '')}) en esa misma franja."
+            )
+            self.lbl_error.show()
+            return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         return {
@@ -649,37 +890,65 @@ class StaffInterface(QWidget):
             "N° Nómina", "Nombre Completo", "Cargo", "Turno", "Supervisor Directo",
             "Salario", "Teléfono", "Correo MTA", "Estado Laboral", "Licencia / Certificación"
         ])
-        he = self.table_empleados.horizontalHeader()
-        if he is not None:
-            he.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_empleados, min_col_width=75)
         self.table_empleados.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_empleados.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_empleados.itemSelectionChanged.connect(self.on_empleado_selected)
         v_layout.addWidget(self.table_empleados, stretch=4)
 
-        # Panel Inferior: Jerarquía y Subordinados
-        card_sub = CardWidget(tab_widget)
-        sub_layout = QVBoxLayout(card_sub)
-        sub_layout.setContentsMargins(16, 12, 16, 12)
-        sub_layout.setSpacing(6)
+        # Panel Inferior: Historial de Actividades Operativas y Jerarquía
+        card_bottom = CardWidget(tab_widget)
+        bottom_layout = QVBoxLayout(card_bottom)
+        bottom_layout.setContentsMargins(16, 12, 16, 12)
+        bottom_layout.setSpacing(8)
 
-        self.lbl_sub_title = StrongBodyLabel("Estructura Jerárquica y Equipo a Cargo", card_sub)
-        sub_layout.addWidget(self.lbl_sub_title)
+        self.lbl_bottom_title = StrongBodyLabel("Historial Operativo y Jerarquía del Empleado Seleccionado", card_bottom)
+        bottom_layout.addWidget(self.lbl_bottom_title)
 
-        self.table_subordinados = TableWidget(card_sub)
+        self.seg_emp_detail = SegmentedWidget(card_bottom)
+        self.seg_emp_detail.addItem("subtab_actividades", "Historial de Actividades (Turnos y Viajes)")
+        self.seg_emp_detail.addItem("subtab_subordinados", "Equipo de Subordinados Directos")
+        self.seg_emp_detail.setCurrentItem("subtab_actividades")
+        self.seg_emp_detail.currentItemChanged.connect(self.on_emp_detail_tab_changed)
+        bottom_layout.addWidget(self.seg_emp_detail)
+
+        self.stack_emp_detail = QStackedWidget(card_bottom)
+
+        # Sub-pestaña 1: Actividades y turnos del empleado
+        page_act = QWidget(self.stack_emp_detail)
+        v_act = QVBoxLayout(page_act)
+        v_act.setContentsMargins(0, 4, 0, 0)
+        self.table_actividades = TableWidget(page_act)
+        self.table_actividades.setBorderVisible(True)
+        self.table_actividades.setColumnCount(6)
+        self.table_actividades.setHorizontalHeaderLabels([
+            "Tipo Actividad", "Identificador", "Fecha", "Horario", "Detalle / Asignación", "Estado"
+        ])
+        configure_interactive_table(self.table_actividades, min_col_width=75)
+        self.table_actividades.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
+        self.table_actividades.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        v_act.addWidget(self.table_actividades)
+        self.stack_emp_detail.addWidget(page_act)
+
+        # Sub-pestaña 2: Subordinados directos
+        page_sub = QWidget(self.stack_emp_detail)
+        v_sub = QVBoxLayout(page_sub)
+        v_sub.setContentsMargins(0, 4, 0, 0)
+        self.table_subordinados = TableWidget(page_sub)
         self.table_subordinados.setBorderVisible(True)
         self.table_subordinados.setColumnCount(5)
         self.table_subordinados.setHorizontalHeaderLabels([
             "N° Nómina", "Nombre del Subordinado", "Cargo", "Estado Laboral", "Vínculo de Supervisión"
         ])
-        hs = self.table_subordinados.horizontalHeader()
-        if hs is not None:
-            hs.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_subordinados, min_col_width=75)
         self.table_subordinados.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_subordinados.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        sub_layout.addWidget(self.table_subordinados)
+        v_sub.addWidget(self.table_subordinados)
+        self.stack_emp_detail.addWidget(page_sub)
 
-        v_layout.addWidget(card_sub, stretch=2)
+        bottom_layout.addWidget(self.stack_emp_detail)
+
+        v_layout.addWidget(card_bottom, stretch=3)
         self.stack_views.addWidget(tab_widget)
 
     # ==========================================================================
@@ -733,9 +1002,7 @@ class StaffInterface(QWidget):
             "ID", "Nómina", "Empleado", "Cargo", "Tipo Certificación / Licencia",
             "Modelos de Tren Habilitados", "Fecha Emisión", "Fecha Vencimiento", "Estado"
         ])
-        hc = self.table_certificaciones.horizontalHeader()
-        if hc is not None:
-            hc.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_certificaciones, min_col_width=75)
         self.table_certificaciones.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_certificaciones.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_certificaciones)
@@ -752,24 +1019,47 @@ class StaffInterface(QWidget):
         v_layout.setContentsMargins(0, 0, 0, 0)
         v_layout.setSpacing(10)
 
-        bar_actions = QHBoxLayout()
-        bar_actions.setSpacing(8)
+        # Fila 1: Filtros de consulta global
+        bar_filters = QHBoxLayout()
+        bar_filters.setSpacing(8)
 
-        bar_actions.addWidget(CaptionLabel("Lugar:", tab_widget))
+        bar_filters.addWidget(CaptionLabel("Empleado:", tab_widget))
+        self.combo_filtro_turno_emp = ComboBox(tab_widget)
+        self.combo_filtro_turno_emp.addItem("(Todos los Empleados)", userData=None)
+        self.combo_filtro_turno_emp.currentIndexChanged.connect(self.refresh_turnos)
+        bar_filters.addWidget(self.combo_filtro_turno_emp, stretch=3)
+
+        bar_filters.addWidget(CaptionLabel("Período:", tab_widget))
+        self.combo_filtro_turno_tiempo = ComboBox(tab_widget)
+        self.combo_filtro_turno_tiempo.addItems(["(Todos)", "Hoy", "Próximos 7 días", "Histórico (Pasados)"])
+        self.combo_filtro_turno_tiempo.currentTextChanged.connect(self.refresh_turnos)
+        bar_filters.addWidget(self.combo_filtro_turno_tiempo, stretch=2)
+
+        bar_filters.addWidget(CaptionLabel("Lugar:", tab_widget))
         self.combo_filtro_turno_lugar = ComboBox(tab_widget)
         self.combo_filtro_turno_lugar.addItems(["(Todos)", "Estación", "Depósito", "Tren", "Centro de Control", "Ruta"])
         self.combo_filtro_turno_lugar.currentTextChanged.connect(self.refresh_turnos)
-        bar_actions.addWidget(self.combo_filtro_turno_lugar, stretch=2)
+        bar_filters.addWidget(self.combo_filtro_turno_lugar, stretch=2)
 
-        bar_actions.addWidget(CaptionLabel("Asistencia:", tab_widget))
+        bar_filters.addWidget(CaptionLabel("Asistencia:", tab_widget))
         self.combo_filtro_turno_asist = ComboBox(tab_widget)
         self.combo_filtro_turno_asist.addItems(["(Todos)", "Programado", "Presente", "Ausente", "Permiso", "Vacaciones", "Sustituido"])
         self.combo_filtro_turno_asist.currentTextChanged.connect(self.refresh_turnos)
-        bar_actions.addWidget(self.combo_filtro_turno_asist, stretch=2)
+        bar_filters.addWidget(self.combo_filtro_turno_asist, stretch=2)
+
+        v_layout.addLayout(bar_filters)
+
+        # Fila 2: Acciones operativas
+        bar_actions = QHBoxLayout()
+        bar_actions.setSpacing(8)
 
         self.btn_nuevo_turno = PrimaryPushButton("Programar Turno", tab_widget, FIF.ADD)
         self.btn_nuevo_turno.clicked.connect(self.handle_nuevo_turno)
         bar_actions.addWidget(self.btn_nuevo_turno)
+
+        self.btn_modificar_turno = PushButton("Modificar Turno", tab_widget, FIF.EDIT)
+        self.btn_modificar_turno.clicked.connect(self.handle_modificar_turno)
+        bar_actions.addWidget(self.btn_modificar_turno)
 
         self.btn_asistencia_turno = PushButton("Registrar Asistencia", tab_widget, FIF.COMPLETED)
         self.btn_asistencia_turno.clicked.connect(self.handle_registrar_asistencia)
@@ -787,6 +1077,7 @@ class StaffInterface(QWidget):
         self.btn_eliminar_turno.clicked.connect(self.handle_eliminar_turno)
         bar_actions.addWidget(self.btn_eliminar_turno)
 
+        bar_actions.addStretch(1)
         v_layout.addLayout(bar_actions)
 
         # Tabla Maestra de Turnos
@@ -797,9 +1088,7 @@ class StaffInterface(QWidget):
             "Código Turno", "Nómina", "Empleado", "Cargo", "Fecha",
             "Horario (Inicio - Fin)", "Lugar de Servicio", "Estado Asistencia"
         ])
-        ht = self.table_turnos.horizontalHeader()
-        if ht is not None:
-            ht.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_turnos, min_col_width=75)
         self.table_turnos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_turnos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_turnos)
@@ -868,9 +1157,7 @@ class StaffInterface(QWidget):
             "N° Viaje", "Ruta", "Línea", "Fecha", "Horario (Salida - Llegada)",
             "Tren Asignado", "Conductor Asignado", "Licencia Técnica", "Estado Viaje"
         ])
-        hvs = self.table_viajes_staff.horizontalHeader()
-        if hvs is not None:
-            hvs.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_viajes_staff, min_col_width=75)
         self.table_viajes_staff.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_viajes_staff.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         viajes_layout.addWidget(self.table_viajes_staff)
@@ -921,6 +1208,15 @@ class StaffInterface(QWidget):
             self.combo_filtro_cert_emp.addItem(f"{e.get('NOMBRE_COMPLETO', '')} ({e.get('CARGO', '')})", userData=e_id)
         self.combo_filtro_cert_emp.blockSignals(False)
 
+        if hasattr(self, "combo_filtro_turno_emp"):
+            self.combo_filtro_turno_emp.blockSignals(True)
+            self.combo_filtro_turno_emp.clear()
+            self.combo_filtro_turno_emp.addItem("(Todos los Empleados)", userData=None)
+            for e in emps:
+                e_id = _safe_int(e.get("ID_EMPLEADO", 0))
+                self.combo_filtro_turno_emp.addItem(f"{e.get('NOMBRE_COMPLETO', '')} ({e.get('CARGO', '')})", userData=e_id)
+            self.combo_filtro_turno_emp.blockSignals(False)
+
     def refresh_kpis(self):
         kpis = m4_staff_service.get_kpis_personal()
         self.lbl_kpi_total.setText(f"Total Personal: {kpis.get('total_empleados', 0)}")
@@ -964,16 +1260,31 @@ class StaffInterface(QWidget):
             self.table_empleados.setItem(r, 5, QTableWidgetItem(f"${_safe_float(row.get('SALARIO')):,} USD"))
             self.table_empleados.setItem(r, 6, QTableWidgetItem(_safe_str(row.get("TELEFONO"))))
             self.table_empleados.setItem(r, 7, QTableWidgetItem(_safe_str(row.get("CORREO_ELECTRONICO"))))
-            self.table_empleados.setItem(r, 8, QTableWidgetItem(_safe_str(row.get("ESTADO_LABORAL"))))
+            est_lab = _safe_str(row.get("ESTADO_LABORAL"))
+            self.table_empleados.setCellWidget(r, 8, StatusBadge(est_lab, self.table_empleados))
 
             cert_str = _safe_str(row.get("CERTIFICACION_PRINCIPAL"))
-            self.table_empleados.setItem(r, 9, QTableWidgetItem(cert_str))
+            if cert_str != "-":
+                self.table_empleados.setCellWidget(r, 9, StatusBadge(cert_str, self.table_empleados))
+            else:
+                self.table_empleados.setItem(r, 9, QTableWidgetItem("-"))
+
+        auto_fit_table_columns(self.table_empleados)
 
         if filtered and self.table_empleados.rowCount() > 0:
             self.table_empleados.selectRow(0)
         else:
             self.table_subordinados.setRowCount(0)
-            self.lbl_sub_title.setText("Estructura Jerárquica (Ningún empleado seleccionado)")
+            self.table_actividades.setRowCount(0)
+            self.lbl_bottom_title.setText("Historial Operativo y Jerarquía (Ningún empleado seleccionado)")
+
+    def on_emp_detail_tab_changed(self, key: str):
+        if key == "subtab_actividades":
+            self.stack_emp_detail.setCurrentIndex(0)
+            self.refresh_actividades_empleado()
+        elif key == "subtab_subordinados":
+            self.stack_emp_detail.setCurrentIndex(1)
+            self.refresh_subordinados()
 
     def on_empleado_selected(self):
         selected_items = self.table_empleados.selectedItems()
@@ -991,9 +1302,31 @@ class StaffInterface(QWidget):
 
         self.selected_empleado_id = _safe_int(emp.get("ID_EMPLEADO", 0))
         self.selected_empleado_nombre = emp.get("NOMBRE_COMPLETO", "")
-        self.lbl_sub_title.setText(f"Estructura Jerárquica de {self.selected_empleado_nombre} (Supervisor: {emp.get('NOMBRE_SUPERVISOR', '-')})")
+        sup_nom = emp.get("NOMBRE_SUPERVISOR") or "Jefatura General"
+        self.lbl_bottom_title.setText(f"Historial Operativo y Jerarquía de {self.selected_empleado_nombre} ({emp.get('CARGO', '')} - Sup: {sup_nom})")
 
+        self.refresh_actividades_empleado()
         self.refresh_subordinados()
+
+    def refresh_actividades_empleado(self):
+        if not self.selected_empleado_id:
+            self.table_actividades.setRowCount(0)
+            return
+
+        acts = m4_staff_service.get_actividades_y_turnos_empleado(self.selected_empleado_id)
+        self.table_actividades.setRowCount(len(acts))
+
+        for r, row in enumerate(acts):
+            tipo_act = _safe_str(row.get("TIPO_ACTIVIDAD"))
+            self.table_actividades.setCellWidget(r, 0, StatusBadge(tipo_act, self.table_actividades))
+            self.table_actividades.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("IDENTIFICADOR"))))
+            self.table_actividades.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("FECHA"))))
+            self.table_actividades.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("HORARIO"))))
+            self.table_actividades.setItem(r, 4, QTableWidgetItem(_safe_str(row.get("DETALLE"))))
+            st = _safe_str(row.get("ESTADO"))
+            self.table_actividades.setCellWidget(r, 5, StatusBadge(st, self.table_actividades))
+
+        auto_fit_table_columns(self.table_actividades)
 
     def refresh_subordinados(self):
         if not self.selected_empleado_id:
@@ -1007,17 +1340,18 @@ class StaffInterface(QWidget):
             self.table_subordinados.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_EMPLEADO"))))
             self.table_subordinados.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NOMBRE_COMPLETO"))))
             self.table_subordinados.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("CARGO"))))
-            self.table_subordinados.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("ESTADO_LABORAL"))))
-            self.table_subordinados.setItem(r, 4, QTableWidgetItem("Supervisión Directa"))
+            est_sub = _safe_str(row.get("ESTADO_LABORAL"))
+            self.table_subordinados.setCellWidget(r, 3, StatusBadge(est_sub, self.table_subordinados))
+            self.table_subordinados.setCellWidget(r, 4, StatusBadge("Supervisión Directa", self.table_subordinados))
+
+        auto_fit_table_columns(self.table_subordinados)
 
     def handle_nuevo_empleado(self):
         dlg = EmpleadoDialog(parent=self.window())
         if dlg.exec():
-            datos = dlg.get_data()
-            if not datos.get("nombre_completo"):
-                InfoBar.warning(title="Campo Obligatorio", content="El nombre completo es requerido.", parent=self.window(), duration=3500)
+            if not dlg.validate():
                 return
-
+            datos = dlg.get_data()
             res = m4_staff_service.crear_empleado(datos)
             if res.get("success"):
                 InfoBar.success(
@@ -1048,6 +1382,8 @@ class StaffInterface(QWidget):
 
         dlg = EmpleadoDialog(parent=self.window(), emp_data=emp_data)
         if dlg.exec():
+            if not dlg.validate():
+                return
             datos = dlg.get_data()
             res = m4_staff_service.modificar_empleado(self.selected_empleado_id, datos)
             if res.get("success"):
@@ -1077,8 +1413,6 @@ class StaffInterface(QWidget):
         if not emp:
             return
 
-        box = MessageBox("Cambiar Estado Laboral", f"Seleccione la acción para {self.selected_empleado_nombre}:", self.window())
-        # Simplificado mediante selector rápido
         nuevo_est = "Activo" if emp.get("ESTADO_LABORAL") != "Activo" else "Permiso"
         res = m4_staff_service.cambiar_estado_laboral(self.selected_empleado_id, nuevo_est)
         if res.get("success"):
@@ -1098,10 +1432,49 @@ class StaffInterface(QWidget):
             InfoBar.warning(title="Selección Requerida", content="Seleccione un empleado para eliminar.", parent=self.window(), duration=3000)
             return
 
+        dep = m4_staff_service.verificar_dependencias_empleado(self.selected_empleado_id)
+        if not dep.get("success"):
+            InfoBar.error(title="Error", content=dep.get("error", ""), parent=self.window(), duration=4000)
+            return
+
+        if dep.get("sub_cnt", 0) > 0:
+            InfoBar.warning(
+                title="Supervisor con Personal a Cargo",
+                content=f"No se puede eliminar a {self.selected_empleado_nombre}: tiene {dep.get('sub_cnt')} subordinado(s) asignado(s). Reasigne su supervisión primero.",
+                parent=self.window(),
+                duration=4500
+            )
+            return
+
+        if dep.get("tiene_dependencias", False):
+            box = MessageBox(
+                "Historial Operativo Detectado",
+                f"El empleado {self.selected_empleado_nombre} no puede ser eliminado físicamente de la base de datos "
+                f"porque posee registros vinculados ({dep.get('resumen')}).\n\n"
+                f"Por integridad referencial, se debe aplicar una Baja Lógica (Estado: Retirado).\n"
+                f"¿Desea cambiar el estado del empleado a 'Retirado'?",
+                self.window()
+            )
+            if box.exec():
+                res = m4_staff_service.dar_de_baja_empleado(self.selected_empleado_id)
+                if res.get("success"):
+                    InfoBar.success(
+                        title="Baja Lógica Exitosa",
+                        content=f"El empleado {self.selected_empleado_nombre} fue marcado como 'Retirado'.",
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=3500
+                    )
+                    self.load_all_data()
+                else:
+                    InfoBar.error(title="Error al Retirar", content=res.get("error", ""), parent=self.window(), duration=4500)
+            return
+
+        # Sin dependencias operativas: eliminación física
         box = MessageBox(
-            "Confirmar Eliminación",
-            f"¿Está seguro de que desea eliminar a {self.selected_empleado_nombre} del sistema?\n"
-            "Solo se permite eliminar si no tiene turnos ni subordinados a cargo.",
+            "Confirmar Eliminación Física",
+            f"¿Está seguro de que desea eliminar definitivamente a {self.selected_empleado_nombre}?\n"
+            "Esta acción borrará al empleado y sus licencias asociadas.",
             self.window()
         )
         if box.exec():
@@ -1143,7 +1516,8 @@ class StaffInterface(QWidget):
             self.table_certificaciones.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NUMERO_EMPLEADO"))))
             self.table_certificaciones.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("NOMBRE_EMPLEADO"))))
             self.table_certificaciones.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("CARGO"))))
-            self.table_certificaciones.setItem(r, 4, QTableWidgetItem(_safe_str(row.get("TIPO_CERTIFICACION"))))
+            tipo_cert = _safe_str(row.get("TIPO_CERTIFICACION"))
+            self.table_certificaciones.setCellWidget(r, 4, StatusBadge(tipo_cert, self.table_certificaciones))
 
             mods_str = _safe_str(row.get("MODELOS_HABILITADOS"))
             self.table_certificaciones.setItem(r, 5, QTableWidgetItem(mods_str if mods_str != "-" else "General"))
@@ -1151,15 +1525,18 @@ class StaffInterface(QWidget):
             self.table_certificaciones.setItem(r, 6, QTableWidgetItem(_safe_str(row.get("FECHA_EMISION"))))
 
             venc_str = _safe_str(row.get("FECHA_VENCIMIENTO"))
-            if _safe_int(row.get("ESTA_VENCIDA")) == 1:
-                venc_str += " (Vencida)"
             self.table_certificaciones.setItem(r, 7, QTableWidgetItem(venc_str))
 
-            self.table_certificaciones.setItem(r, 8, QTableWidgetItem(_safe_str(row.get("ESTADO"))))
+            est_cert = _safe_str(row.get("ESTADO"))
+            self.table_certificaciones.setCellWidget(r, 8, StatusBadge(est_cert, self.table_certificaciones))
+
+        auto_fit_table_columns(self.table_certificaciones)
 
     def handle_nueva_certificacion(self):
         dlg = CertificacionDialog(parent=self.window())
         if dlg.exec():
+            if not dlg.validate():
+                return
             datos = dlg.get_data()
             modelos_ids = dlg.get_modelos_ids()
             res = m4_staff_service.crear_certificacion(datos, modelos_ids)
@@ -1201,6 +1578,8 @@ class StaffInterface(QWidget):
 
         dlg = CertificacionDialog(parent=self.window(), cert_data=cert)
         if dlg.exec():
+            if not dlg.validate():
+                return
             datos = dlg.get_data()
             modelos_ids = dlg.get_modelos_ids()
             res = m4_staff_service.modificar_certificacion(c_id, datos, modelos_ids)
@@ -1270,9 +1649,14 @@ class StaffInterface(QWidget):
     def refresh_turnos(self):
         lugar = self.combo_filtro_turno_lugar.currentText()
         asist = self.combo_filtro_turno_asist.currentText()
+        emp_id = self.combo_filtro_turno_emp.currentData() if hasattr(self, "combo_filtro_turno_emp") else None
+        tiempo = self.combo_filtro_turno_tiempo.currentText() if hasattr(self, "combo_filtro_turno_tiempo") else None
+
         self.turnos_cache = m4_staff_service.get_turnos(
+            empleado_id=emp_id,
             tipo_lugar=lugar if lugar != "(Todos)" else None,
-            estado_asistencia=asist if asist != "(Todos)" else None
+            estado_asistencia=asist if asist != "(Todos)" else None,
+            filtro_tiempo=tiempo if tiempo != "(Todos)" else None
         )
         self.table_turnos.setRowCount(len(self.turnos_cache))
 
@@ -1289,11 +1673,16 @@ class StaffInterface(QWidget):
             lugar_str = f"{row.get('TIPO_LUGAR', '')} ({row.get('FUNCION', '')})"
             self.table_turnos.setItem(r, 6, QTableWidgetItem(lugar_str))
 
-            self.table_turnos.setItem(r, 7, QTableWidgetItem(_safe_str(row.get("ESTADO_ASISTENCIA"))))
+            est_asist = _safe_str(row.get("ESTADO_ASISTENCIA"))
+            self.table_turnos.setCellWidget(r, 7, StatusBadge(est_asist, self.table_turnos))
+
+        auto_fit_table_columns(self.table_turnos)
 
     def handle_nuevo_turno(self):
         dlg = TurnoDialog(parent=self.window())
         if dlg.exec():
+            if not dlg.validate():
+                return
             datos = dlg.get_data()
             res = m4_staff_service.crear_turno(datos)
             if res.get("success"):
@@ -1313,6 +1702,47 @@ class StaffInterface(QWidget):
                     parent=self.window(),
                     position=InfoBarPosition.TOP_RIGHT,
                     duration=5000
+                )
+
+    def handle_modificar_turno(self):
+        selected = self.table_turnos.selectedItems()
+        if not selected:
+            InfoBar.warning(title="Selección Requerida", content="Seleccione un turno de la tabla.", parent=self.window(), duration=3000)
+            return
+
+        row = selected[0].row()
+        item_cod = self.table_turnos.item(row, 0)
+        if not item_cod:
+            return
+
+        cod = item_cod.text()
+        turno = next((t for t in self.turnos_cache if t.get("CODIGO_TURNO") == cod), None)
+        if not turno:
+            return
+
+        t_id = _safe_int(turno.get("ID_TURNO", 0))
+        dlg = TurnoDialog(parent=self.window(), turno_data=turno)
+        if dlg.exec():
+            if not dlg.validate():
+                return
+            datos = dlg.get_data()
+            res = m4_staff_service.modificar_turno(t_id, datos)
+            if res.get("success"):
+                InfoBar.success(
+                    title="Turno Actualizado",
+                    content=f"Turno {cod} actualizado correctamente.",
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=3500
+                )
+                self.refresh_turnos()
+            else:
+                InfoBar.error(
+                    title="Error al Modificar Turno",
+                    content=res.get("error", "No se pudo actualizar el turno."),
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=4500
                 )
 
     def handle_registrar_asistencia(self):
@@ -1457,7 +1887,11 @@ class StaffInterface(QWidget):
         for r, row in enumerate(viajes):
             self.table_viajes_staff.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_VIAJE"))))
             self.table_viajes_staff.setItem(r, 1, QTableWidgetItem(f"Ruta {_safe_str(row.get('CODIGO_RUTA'))}"))
-            self.table_viajes_staff.setItem(r, 2, QTableWidgetItem(f"Línea {_safe_str(row.get('CODIGO_LINEA'))}"))
+            lin_cod = _safe_str(row.get('CODIGO_LINEA'))
+            lin_col = _safe_str(row.get('COLOR_LINEA', '#0039A6'))
+            chip = LineColorChip(lin_cod, lin_col, f"Línea {lin_cod}", self.table_viajes_staff)
+            self.table_viajes_staff.setCellWidget(r, 2, chip)
+
             self.table_viajes_staff.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("FECHA"))))
 
             horario_str = f"{row.get('HORA_SALIDA_CORTA', '')} - {row.get('HORA_LLEGADA_CORTA', '')}"
@@ -1470,9 +1904,12 @@ class StaffInterface(QWidget):
             self.table_viajes_staff.setItem(r, 6, QTableWidgetItem(cond_str if cond_str != "-" else "(Sin Conductor)"))
 
             lic_str = _safe_str(row.get("ESTADO_LICENCIA_CONDUCTOR"))
-            self.table_viajes_staff.setItem(r, 7, QTableWidgetItem(lic_str))
+            self.table_viajes_staff.setCellWidget(r, 7, StatusBadge(lic_str, self.table_viajes_staff))
 
-            self.table_viajes_staff.setItem(r, 8, QTableWidgetItem(_safe_str(row.get("ESTADO_VIAJE"))))
+            st_viaje = _safe_str(row.get("ESTADO_VIAJE"))
+            self.table_viajes_staff.setCellWidget(r, 8, StatusBadge(st_viaje, self.table_viajes_staff))
+
+        auto_fit_table_columns(self.table_viajes_staff)
 
     def handle_asignar_conductor(self):
         selected = self.table_viajes_staff.selectedItems()

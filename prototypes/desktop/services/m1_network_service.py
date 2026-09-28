@@ -52,10 +52,35 @@ def get_estacion_detalle(id_estacion: int) -> dict:
     return rows[0] if rows else {}
 
 
+def validar_coordenadas(latitud: float, longitud: float) -> tuple[bool, str]:
+    """
+    Valida que las coordenadas geograficas cumplan con las restricciones WGS84
+    y rechaza la coordenada nula (0, 0 / Null Island).
+    """
+    if latitud == 0.0 or longitud == 0.0:
+        return False, "Las coordenadas no pueden ser cero (0.0). Ingrese coordenadas geograficas reales."
+    if not (-90.0 <= latitud <= 90.0):
+        return False, f"Latitud invalida ({latitud}). Debe estar en el rango [-90.0, 90.0]."
+    if not (-180.0 <= longitud <= 180.0):
+        return False, f"Longitud invalida ({longitud}). Debe estar en el rango [-180.0, 180.0]."
+    return True, ""
+
+
 def crear_estacion(datos: dict) -> dict:
     """
     Crea una nueva estación en la red de metro de Nueva York.
+    Valida coordenadas geograficas antes de enviar a base de datos.
     """
+    try:
+        lat = float(datos.get("latitud", 40.7128))
+        lon = float(datos.get("longitud", -74.0060))
+    except (ValueError, TypeError):
+        return {"success": False, "error": "Las coordenadas de latitud y longitud deben ser valores numericos."}
+
+    valido, msg_error = validar_coordenadas(lat, lon)
+    if not valido:
+        return {"success": False, "error": msg_error}
+
     sql = """
         INSERT INTO ESTACION (
             id_estacion, codigo, nombre, direccion, distrito,
@@ -77,8 +102,8 @@ def crear_estacion(datos: dict) -> dict:
             "nombre": datos["nombre"].strip(),
             "direccion": datos.get("direccion", "Desconocida").strip(),
             "distrito": datos.get("distrito", "Manhattan"),
-            "latitud": float(datos.get("latitud", 40.7128)),
-            "longitud": float(datos.get("longitud", -74.0060)),
+            "latitud": lat,
+            "longitud": lon,
             "cantidad_accesos": int(datos.get("cantidad_accesos", 2)),
             "cantidad_plataformas": int(datos.get("cantidad_plataformas", 2)),
             "estado_operativo": datos.get("estado_operativo", "Operativa"),
@@ -95,8 +120,18 @@ def crear_estacion(datos: dict) -> dict:
 
 def modificar_estacion(id_estacion: int, datos: dict) -> dict:
     """
-    Actualiza los atributos de una estación existente.
+    Actualiza los atributos de una estación existente con validación previa de coordenadas.
     """
+    try:
+        lat = float(datos.get("latitud", 40.7128))
+        lon = float(datos.get("longitud", -74.0060))
+    except (ValueError, TypeError):
+        return {"success": False, "error": "Las coordenadas de latitud y longitud deben ser valores numericos."}
+
+    valido, msg_error = validar_coordenadas(lat, lon)
+    if not valido:
+        return {"success": False, "error": msg_error}
+
     sql = """
         UPDATE ESTACION SET
             nombre = :nombre,
@@ -120,8 +155,8 @@ def modificar_estacion(id_estacion: int, datos: dict) -> dict:
             "nombre": datos["nombre"].strip(),
             "direccion": datos.get("direccion", "Desconocida").strip(),
             "distrito": datos.get("distrito", "Manhattan"),
-            "latitud": float(datos.get("latitud", 40.7128)),
-            "longitud": float(datos.get("longitud", -74.0060)),
+            "latitud": lat,
+            "longitud": lon,
             "cantidad_accesos": int(datos.get("cantidad_accesos", 2)),
             "cantidad_plataformas": int(datos.get("cantidad_plataformas", 2)),
             "estado_operativo": datos.get("estado_operativo", "Operativa"),
@@ -131,19 +166,153 @@ def modificar_estacion(id_estacion: int, datos: dict) -> dict:
             "accesible_discapacidad": "S" if datos.get("ada") else "N",
             "tipo_estacion": datos.get("tipo_estacion", "Local")
         })
-        return {"success": True, "mensaje": f"Estación actualizada correctamente."}
+        return {"success": True, "mensaje": "Estación actualizada correctamente."}
     except Exception as e:
         return {"success": False, "error": parse_oracle_error(e)}
 
 
 def cambiar_estado_estacion(id_estacion: int, nuevo_estado: str) -> dict:
-    """Cambia el estado operativo de una estación ('Operativa', 'Cerrada', 'Cerrada Temporalmente')."""
+    """Cambia el estado operativo de una estación ('Operativa', 'Cerrada', 'Cerrada Temporalmente', 'Inactiva')."""
     sql = "UPDATE ESTACION SET estado_operativo = :estado WHERE id_estacion = :id"
     try:
         execute_dml(sql, {"estado": nuevo_estado, "id": id_estacion})
         return {"success": True, "mensaje": f"Estado de la estación cambiado a '{nuevo_estado}'."}
     except Exception as e:
         return {"success": False, "error": parse_oracle_error(e)}
+
+
+def verificar_dependencias_estacion(id_estacion: int) -> dict:
+    """
+    Audita todas las dependencias relacionales de una estación antes de cualquier acción de baja o borrado.
+    Verifica plataformas, paradas y terminales de línea, rutas, transferencias, viajes históricos e incidentes.
+    """
+    sql = """
+        SELECT
+            (SELECT COUNT(*) FROM PLATAFORMA WHERE estacion_id = :id) as plataformas,
+            (SELECT COUNT(*) FROM LINEA_ESTACION WHERE estacion_id = :id) as lineas_estacion,
+            (SELECT COUNT(*) FROM LINEA WHERE estacion_origen_id = :id OR estacion_destino_id = :id) as lineas_terminal,
+            (SELECT COUNT(*) FROM RUTA_DETALLE WHERE estacion_id = :id) as rutas_detalle,
+            (SELECT COUNT(*) FROM RUTA WHERE estacion_origen_id = :id OR estacion_destino_id = :id) as rutas_terminal,
+            (SELECT COUNT(*) FROM TRANSFERENCIA WHERE estacion_id = :id) as transferencias,
+            (SELECT COUNT(*) FROM VIAJE_PASAJERO WHERE estacion_ingreso_id = :id OR estacion_salida_id = :id) as viajes,
+            (SELECT COUNT(*) FROM INCIDENTE_ELEMENTO_AFECTADO WHERE estacion_id = :id) as incidentes
+        FROM dual
+    """
+    try:
+        rows = execute_query(sql, {"id": id_estacion})["rows"]
+        if not rows:
+            return {"plataformas": 0, "lineas": 0, "rutas": 0, "transferencias": 0, "viajes": 0, "incidentes": 0, "total": 0, "tiene_dependencias": False}
+        d = rows[0]
+        plats = int(d.get("PLATAFORMAS", 0))
+        lins_est = int(d.get("LINEAS_ESTACION", 0))
+        lins_term = int(d.get("LINEAS_TERMINAL", 0))
+        ruts_det = int(d.get("RUTAS_DETALLE", 0))
+        ruts_term = int(d.get("RUTAS_TERMINAL", 0))
+        trans = int(d.get("TRANSFERENCIAS", 0))
+        vjs = int(d.get("VIAJES", 0))
+        incs = int(d.get("INCIDENTES", 0))
+
+        lins_total = lins_est + lins_term
+        ruts_total = ruts_det + ruts_term
+        total = plats + lins_total + ruts_total + trans + vjs + incs
+        return {
+            "plataformas": plats,
+            "lineas": lins_total,
+            "rutas": ruts_total,
+            "transferencias": trans,
+            "viajes": vjs,
+            "incidentes": incs,
+            "total": total,
+            "tiene_dependencias": total > 0
+        }
+    except Exception:
+        return {"plataformas": 0, "lineas": 0, "rutas": 0, "transferencias": 0, "viajes": 0, "incidentes": 0, "total": 0, "tiene_dependencias": False}
+
+
+def eliminar_estacion(id_estacion: int, forzar_soft_delete: bool = True) -> dict:
+    """
+    Elimina o da de baja una estación de metro con estricta salvaguarda relacional.
+    Por defecto ejecuta un Soft-Delete (marcar como 'Cerrada' y desactivar plataformas),
+    preservando el historial de viajes, lineas y auditorias de transito.
+    Si se solicita borrado fisico, bloquea si existen registros dependientes.
+    """
+    try:
+        deps = verificar_dependencias_estacion(id_estacion)
+
+        if forzar_soft_delete:
+            # Soft-Delete: Marcar estacion como 'Cerrada'
+            execute_dml(
+                "UPDATE ESTACION SET estado_operativo = 'Cerrada' WHERE id_estacion = :id",
+                {"id": id_estacion}
+            )
+            # Desactivar plataformas vinculadas
+            execute_dml(
+                "UPDATE PLATAFORMA SET estado_operativo = 'Fuera de Servicio' WHERE estacion_id = :id",
+                {"id": id_estacion}
+            )
+            return {
+                "success": True,
+                "mensaje": "Baja operativa segura ejecutada (Soft-Delete). La estación y sus plataformas asociadas fueron marcadas como 'Cerrada'. La integridad historica de la red ha sido preservada.",
+                "soft_deleted": True
+            }
+
+        # Intento de Hard-Delete fisico
+        if deps["tiene_dependencias"]:
+            detalles = []
+            if deps["lineas"] > 0:
+                detalles.append(f"{deps['lineas']} líneas")
+            if deps["rutas"] > 0:
+                detalles.append(f"{deps['rutas']} rutas")
+            if deps["plataformas"] > 0:
+                detalles.append(f"{deps['plataformas']} plataformas")
+            if deps["viajes"] > 0:
+                detalles.append(f"{deps['viajes']} viajes históricos")
+            if deps["incidentes"] > 0:
+                detalles.append(f"{deps['incidentes']} incidentes")
+            detalle_str = ", ".join(detalles)
+            return {
+                "success": False,
+                "error": f"Bloqueo de seguridad: No se puede eliminar físicamente la estación porque posee dependencias activas ({detalle_str}). Utilice la Baja Operativa (Soft-Delete) para preservar los registros de tránsito."
+            }
+
+        # Borrado fisico permitido unicamente si no tiene dependencias
+        execute_dml("DELETE FROM ESTACION WHERE id_estacion = :id", {"id": id_estacion})
+        return {
+            "success": True,
+            "mensaje": "Estación sin dependencias eliminada físicamente de forma exitosa.",
+            "soft_deleted": False
+        }
+    except Exception as e:
+        return {"success": False, "error": parse_oracle_error(e)}
+
+
+def dar_de_baja_masiva_estaciones(ids_estaciones: list[int]) -> dict:
+    """
+    Intercepta intentos de eliminacion masiva y los convierte en Soft-Delete controlado,
+    impidiendo la eliminacion fisica en cascada que destruiria la red.
+    """
+    if not ids_estaciones:
+        return {"success": False, "error": "No se especificaron estaciones para procesar."}
+
+    procesadas = 0
+    errores = []
+    for est_id in ids_estaciones:
+        res = eliminar_estacion(est_id, forzar_soft_delete=True)
+        if res.get("success"):
+            procesadas += 1
+        else:
+            errores.append(f"ID {est_id}: {res.get('error')}")
+
+    if errores:
+        return {
+            "success": True,
+            "mensaje": f"Se procesaron {procesadas} de {len(ids_estaciones)} estaciones con Soft-Delete. Ocurrieron errores en algunas estaciones.",
+            "errores": errores
+        }
+    return {
+        "success": True,
+        "mensaje": f"Protección activa: {procesadas} estaciones fueron dadas de baja operativamente (Soft-Delete: 'Cerrada') sin comprometer la integridad de la base de datos."
+    }
 
 
 # ==============================================================================
@@ -489,4 +658,24 @@ def get_estaciones_disponibles_para_linea(id_linea: int) -> list:
         ORDER BY nombre ASC
     """
     return execute_query(sql, {"id": id_linea})["rows"]
+
+
+def get_operadores_linea_combo() -> list:
+    """
+    Retorna exclusivamente empleados activos con el cargo 'Operador de Control'
+    (personal del Puesto Central de Control / OCC) para asignar como
+    Operador Responsable de líneas de metro.
+    """
+    sql = """
+        SELECT id_empleado, numero_empleado, nombre_completo, cargo
+        FROM EMPLEADO
+        WHERE estado_laboral = 'Activo'
+          AND LOWER(cargo) = 'operador de control'
+        ORDER BY nombre_completo ASC
+    """
+    rows = execute_query(sql)["rows"]
+    if not rows:
+        return [{"ID_EMPLEADO": 1, "NUMERO_EMPLEADO": "EMP-1001", "NOMBRE_COMPLETO": "Carlos Roberto Morales", "CARGO": "Operador de Control"}]
+    return rows
+
 

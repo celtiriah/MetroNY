@@ -25,6 +25,24 @@ def _query_rows(sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[
     return res.get("rows", [])
 
 
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 # ==============================================================================
 # 1. GESTION DE EMPLEADOS (EMPLEADO)
 # ==============================================================================
@@ -120,24 +138,71 @@ def get_supervisores_combo() -> List[Dict[str, Any]]:
     return _query_rows(sql)
 
 
+def _validar_datos_empleado(datos: Dict[str, Any], id_empleado: Optional[int] = None) -> Optional[str]:
+    """Valida reglas de dominio y restricciones laborales para un empleado."""
+    nombre = str(datos.get("nombre_completo") or "").strip()
+    if not nombre or len(nombre) < 3:
+        return "El nombre completo del empleado es obligatorio (mínimo 3 caracteres)."
+
+    cargos_validos = [
+        "Conductor", "Operador de Control", "Supervisor de Estación",
+        "Técnico de Mantenimiento", "Agente de Seguridad", "Personal de Atención al Pasajero"
+    ]
+    cargo = str(datos.get("cargo") or "").strip()
+    if cargo not in cargos_validos:
+        return f"Cargo inválido. Debe seleccionar uno de los cargos oficiales: {', '.join(cargos_validos)}."
+
+    sal = datos.get("salario")
+    if sal is not None and str(sal).strip() != "":
+        try:
+            sal_flt = float(sal)
+            if sal_flt <= 0:
+                return "El salario debe ser un valor positivo mayor a 0."
+        except (ValueError, TypeError):
+            return "El salario ingresado no es un valor numérico válido."
+
+    tel = str(datos.get("telefono") or "").strip()
+    if not tel:
+        return "El teléfono de contacto de emergencia es obligatorio."
+
+    correo = str(datos.get("correo_electronico") or "").strip()
+    if correo and "@" not in correo:
+        return "El correo electrónico debe tener un formato válido (p.ej. usuario@mta.info)."
+
+    f_nac = datos.get("fecha_nacimiento")
+    if f_nac and str(f_nac).strip():
+        try:
+            d_nac = datetime.strptime(str(f_nac).strip()[:10], "%Y-%m-%d").date()
+            hoy = date.today()
+            edad = hoy.year - d_nac.year - ((hoy.month, hoy.day) < (d_nac.month, d_nac.day))
+            if edad < 18:
+                return f"Validación laboral: El empleado debe tener al menos 18 años de edad cumplidos (Edad calculada: {edad} años)."
+        except ValueError:
+            return "El formato de la fecha de nacimiento debe ser estrictamente YYYY-MM-DD."
+
+    f_cont = datos.get("fecha_contratacion")
+    if f_cont and str(f_cont).strip():
+        try:
+            datetime.strptime(str(f_cont).strip()[:10], "%Y-%m-%d")
+        except ValueError:
+            return "El formato de la fecha de contratación debe ser estrictamente YYYY-MM-DD."
+
+    sup_id = datos.get("supervisor_id")
+    if sup_id and id_empleado and int(sup_id) == id_empleado:
+        return "Un empleado no puede ser asignado como su propio supervisor."
+
+    return None
+
+
 def crear_empleado(datos: Dict[str, Any]) -> Dict[str, Any]:
     """
     Registra un nuevo empleado en la tabla EMPLEADO usando SEQ_EMPLEADO.NEXTVAL.
-    Parámetros requeridos:
-      - nombre_completo (str)
-      - cargo (str)
-    Opcionales:
-      - numero_empleado (str)
-      - fecha_nacimiento (YYYY-MM-DD)
-      - direccion (str)
-      - telefono (str)
-      - correo_electronico (str)
-      - fecha_contratacion (YYYY-MM-DD)
-      - turno_habitual (str)
-      - salario (float)
-      - estado_laboral (str, default 'Activo')
-      - supervisor_id (int)
+    Valida preventivamente mayoría de edad, salario positivo, cargo y datos de contacto.
     """
+    err_val = _validar_datos_empleado(datos)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -198,10 +263,13 @@ def modificar_empleado(id_empleado: int, datos: Dict[str, Any]) -> Dict[str, Any
     """
     Actualiza la información contractual, cargo o supervisor de un empleado.
     """
+    err_val = _validar_datos_empleado(datos, id_empleado=id_empleado)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Evitar que un empleado sea supervisor de sí mismo
         sup_id = datos.get("supervisor_id")
         if sup_id and int(sup_id) == id_empleado:
             return {"success": False, "error": "Un empleado no puede ser su propio supervisor."}
@@ -232,7 +300,7 @@ def modificar_empleado(id_empleado: int, datos: Dict[str, Any]) -> Dict[str, Any
             "f_cont": datos.get("fecha_contratacion") or None,
             "cargo": datos.get("cargo"),
             "turno": datos.get("turno_habitual") or None,
-            "salario": float(datos.get("salario") or 0.0),
+            "salario": _safe_float(datos.get("salario")),
             "sup_id": sup_id
         }
         cursor.execute(sql, params)
@@ -271,49 +339,131 @@ def cambiar_estado_laboral(id_empleado: int, nuevo_estado: str) -> Dict[str, Any
         conn.close()
 
 
-def eliminar_empleado(id_empleado: int) -> Dict[str, Any]:
+def verificar_dependencias_empleado(id_empleado: int) -> Dict[str, Any]:
     """
-    Elimina un empleado del sistema si no tiene turnos asignados, viajes asignados
-    ni empleados a su cargo.
+    Audita exhaustivamente el historial operativo y relaciones del empleado:
+    - Subordinados directos a su cargo
+    - Viajes asignados como conductor
+    - Turnos laborales programados e históricos
+    - Certificaciones técnicas registradas
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # 1. Validar si tiene subordinados
+        cursor.execute("SELECT numero_empleado, nombre_completo, cargo, estado_laboral FROM EMPLEADO WHERE id_empleado = :id", {"id": id_empleado})
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "error": "El empleado no existe en la base de datos."}
+        num_emp, nombre, cargo, estado_lab = str(row[0]), str(row[1]), str(row[2]), str(row[3])
+
+        # 1. Subordinados
         cursor.execute("SELECT COUNT(*) FROM EMPLEADO WHERE supervisor_id = :id", {"id": id_empleado})
-        sub_cnt = cursor.fetchone()[0]
-        if sub_cnt > 0:
-            return {
-                "success": False,
-                "error": f"No se puede eliminar: tiene {sub_cnt} empleado(s) bajo su supervisión. Reasigne la supervisión primero."
-            }
+        sub_cnt = int(cursor.fetchone()[0])
 
-        # 2. Validar si tiene viajes asignados
+        # 2. Viajes
         cursor.execute("SELECT COUNT(*) FROM VIAJE_PROGRAMADO WHERE conductor_id = :id", {"id": id_empleado})
-        viajes_cnt = cursor.fetchone()[0]
-        if viajes_cnt > 0:
-            return {
-                "success": False,
-                "error": f"No se puede eliminar: tiene {viajes_cnt} viaje(s) asignado(s) en el sistema de despacho."
-            }
+        viajes_cnt = int(cursor.fetchone()[0])
 
-        # 3. Validar si tiene turnos
+        # 3. Turnos
         cursor.execute("SELECT COUNT(*) FROM TURNO WHERE empleado_id = :id", {"id": id_empleado})
-        turnos_cnt = cursor.fetchone()[0]
-        if turnos_cnt > 0:
-            return {
-                "success": False,
-                "error": f"No se puede eliminar: tiene {turnos_cnt} turno(s) programado(s) en el historial."
-            }
+        turnos_cnt = int(cursor.fetchone()[0])
 
-        # 4. Eliminar certificaciones asociadas
+        # 4. Certificaciones
+        cursor.execute("SELECT COUNT(*) FROM CERTIFICACION WHERE empleado_id = :id", {"id": id_empleado})
+        certs_cnt = int(cursor.fetchone()[0])
+
+        resumen_partes = []
+        if sub_cnt > 0:
+            resumen_partes.append(f"{sub_cnt} subordinado(s) a cargo")
+        if viajes_cnt > 0:
+            resumen_partes.append(f"{viajes_cnt} viaje(s) asignado(s)")
+        if turnos_cnt > 0:
+            resumen_partes.append(f"{turnos_cnt} turno(s) en historial")
+        if certs_cnt > 0:
+            resumen_partes.append(f"{certs_cnt} certificación(es)")
+
+        resumen_texto = ", ".join(resumen_partes) if resumen_partes else "Sin actividad operativa registrada"
+        tiene_dependencias = (sub_cnt > 0 or viajes_cnt > 0 or turnos_cnt > 0)
+        puede_eliminar_fisico = not tiene_dependencias and certs_cnt == 0
+
+        return {
+            "success": True,
+            "id_empleado": id_empleado,
+            "numero_empleado": num_emp,
+            "nombre_completo": nombre,
+            "cargo": cargo,
+            "estado_laboral": estado_lab,
+            "sub_cnt": sub_cnt,
+            "viajes_cnt": viajes_cnt,
+            "turnos_cnt": turnos_cnt,
+            "certs_cnt": certs_cnt,
+            "tiene_dependencias": tiene_dependencias,
+            "puede_eliminar_fisico": puede_eliminar_fisico,
+            "resumen": resumen_texto
+        }
+    except Exception as exc:
+        return {"success": False, "error": parse_oracle_error(exc)}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def dar_de_baja_empleado(id_empleado: int) -> Dict[str, Any]:
+    """
+    Aplica baja lógica (Soft-Delete) a un empleado marcando su estado como 'Retirado'.
+    Verifica que se reasigne la supervisión de subordinados primero.
+    """
+    dep = verificar_dependencias_empleado(id_empleado)
+    if not dep.get("success"):
+        return dep
+
+    if dep.get("sub_cnt", 0) > 0:
+        return {
+            "success": False,
+            "error": f"No se puede retirar al empleado {dep.get('nombre_completo')}: tiene {dep.get('sub_cnt')} subordinado(s) asignado(s). Reasigne la supervisión primero."
+        }
+
+    return cambiar_estado_laboral(id_empleado, "Retirado")
+
+
+def eliminar_empleado(id_empleado: int) -> Dict[str, Any]:
+    """
+    Elimina un empleado del sistema si no posee historial operativo alguno.
+    Si posee viajes o turnos registrados, instruye a aplicar la baja lógica (Retirado).
+    """
+    dep = verificar_dependencias_empleado(id_empleado)
+    if not dep.get("success"):
+        return dep
+
+    if dep.get("sub_cnt", 0) > 0:
+        return {
+            "success": False,
+            "error": f"No se puede eliminar: tiene {dep.get('sub_cnt')} empleado(s) bajo su supervisión. Reasigne la supervisión primero."
+        }
+
+    if dep.get("tiene_dependencias", False):
+        return {
+            "success": False,
+            "requiere_baja_logica": True,
+            "resumen": dep.get("resumen"),
+            "error": (
+                f"No se permite la eliminación física del empleado {dep.get('nombre_completo')} "
+                f"debido a que posee historial operativo registrado ({dep.get('resumen')}). "
+                f"Por integridad relacional, se debe aplicar baja lógica (estado Retirado)."
+            )
+        }
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Eliminar certificaciones asociadas
         cursor.execute("""
             DELETE FROM CERTIFICACION_MODELO
             WHERE certificacion_id IN (SELECT id_certificacion FROM CERTIFICACION WHERE empleado_id = :id)
         """, {"id": id_empleado})
         cursor.execute("DELETE FROM CERTIFICACION WHERE empleado_id = :id", {"id": id_empleado})
 
-        # 5. Eliminar empleado
+        # Eliminar empleado
         cursor.execute("DELETE FROM EMPLEADO WHERE id_empleado = :id", {"id": id_empleado})
 
         conn.commit()
@@ -374,6 +524,71 @@ def get_certificaciones(
     return _query_rows(sql, params)
 
 
+def _validar_datos_certificacion(
+    datos: Dict[str, Any],
+    id_certificacion: Optional[int] = None
+) -> Optional[str]:
+    """
+    Valida la coherencia de datos de una certificación técnica:
+    - Empleado asignado
+    - Tipo de certificación no vacío
+    - Fechas válidas en formato YYYY-MM-DD
+    - Fecha vencimiento >= Fecha emisión (CK_CERTIFICACION_FECHAS)
+    - Inmutabilidad de fechas en registros históricos vencidos o revocados (TRG_CERTIFICACION_INMUTABLE)
+    """
+    emp_id = datos.get("empleado_id")
+    if not emp_id and id_certificacion is None:
+        return "Debe seleccionar un empleado para la certificación."
+
+    tipo = str(datos.get("tipo_certificacion") or "").strip()
+    if not tipo:
+        return "El tipo de certificación técnica es obligatorio."
+
+    f_emi_str = str(datos.get("fecha_emision") or "").strip()
+    f_venc_str = str(datos.get("fecha_vencimiento") or "").strip()
+
+    d_emi: Optional[date] = None
+    d_venc: Optional[date] = None
+
+    if f_emi_str:
+        try:
+            d_emi = datetime.strptime(f_emi_str, "%Y-%m-%d").date()
+        except ValueError:
+            return "Formato inválido en fecha de emisión. Utilice YYYY-MM-DD."
+
+    if f_venc_str:
+        try:
+            d_venc = datetime.strptime(f_venc_str, "%Y-%m-%d").date()
+        except ValueError:
+            return "Formato inválido en fecha de vencimiento. Utilice YYYY-MM-DD."
+
+    if d_emi and d_venc and d_venc < d_emi:
+        return "La fecha de vencimiento no puede ser anterior a la fecha de emisión."
+
+    if id_certificacion is not None:
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT estado, TO_CHAR(fecha_emision, 'YYYY-MM-DD'), TO_CHAR(fecha_vencimiento, 'YYYY-MM-DD') FROM CERTIFICACION WHERE id_certificacion = :id",
+                {"id": id_certificacion}
+            )
+            row = cursor.fetchone()
+            if row:
+                est_previo, emi_prev, venc_prev = str(row[0]), str(row[1] or ""), str(row[2] or "")
+                if est_previo in ("Vencida", "Revocada"):
+                    if (f_emi_str and f_emi_str != emi_prev) or (f_venc_str and f_venc_str != venc_prev):
+                        return (
+                            f"Operación rechazada: No se permite modificar las fechas de una certificación en estado '{est_previo}' "
+                            f"(inmutabilidad de histórico operativo)."
+                        )
+        finally:
+            cursor.close()
+            conn.close()
+
+    return None
+
+
 def crear_certificacion(
     datos: Dict[str, Any],
     modelos_ids: Optional[List[int]] = None
@@ -382,6 +597,10 @@ def crear_certificacion(
     Registra una certificación técnica o licencia de conducción para un empleado.
     Permite asociarla con uno o varios modelos de tren (CERTIFICACION_MODELO).
     """
+    err_val = _validar_datos_certificacion(datos)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -436,6 +655,10 @@ def modificar_certificacion(
     """
     Actualiza datos de una certificación y renueva la asociación de modelos de tren.
     """
+    err_val = _validar_datos_certificacion(datos, id_certificacion=id_certificacion)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -554,11 +777,13 @@ def get_turnos(
     fecha: Optional[str] = None,
     empleado_id: Optional[int] = None,
     tipo_lugar: Optional[str] = None,
-    estado_asistencia: Optional[str] = None
+    estado_asistencia: Optional[str] = None,
+    filtro_tiempo: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Retorna la programación de turnos laborales con datos del empleado,
-    intervalo horario y estado de asistencia.
+    intervalo horario y estado de asistencia. Soporta filtros temporales
+    ('Hoy', 'Próximos 7 días', 'Histórico (Pasados)', '(Todos)').
     """
     sql = """
         SELECT t.id_turno, t.codigo_turno, t.empleado_id,
@@ -577,6 +802,13 @@ def get_turnos(
     if fecha:
         sql += " AND t.fecha = TO_DATE(:fecha, 'YYYY-MM-DD')"
         params["fecha"] = fecha
+    elif filtro_tiempo and filtro_tiempo != "(Todos)":
+        if filtro_tiempo == "Hoy":
+            sql += " AND t.fecha = TRUNC(SYSDATE)"
+        elif filtro_tiempo == "Próximos 7 días":
+            sql += " AND t.fecha >= TRUNC(SYSDATE) AND t.fecha <= TRUNC(SYSDATE) + 7"
+        elif filtro_tiempo == "Histórico (Pasados)":
+            sql += " AND t.fecha < TRUNC(SYSDATE)"
 
     if empleado_id is not None:
         sql += " AND t.empleado_id = :emp_id"
@@ -631,23 +863,73 @@ def validar_traslape_turno(
     return rows[0] if rows else None
 
 
+def _validar_datos_turno(
+    datos: Dict[str, Any],
+    id_turno: Optional[int] = None
+) -> Optional[str]:
+    """
+    Valida preventivamente los datos de programación de un turno laboral:
+    - Empleado seleccionado
+    - Formato de fecha YYYY-MM-DD
+    - Formato de horas HH:MI
+    - Secuencia horaria: hora_fin > hora_inicio
+    - Límite máximo de duración continua: <= 16 horas
+    - Conflicto de traslape con otros turnos del mismo empleado
+    """
+    emp_id = datos.get("empleado_id")
+    if not emp_id:
+        return "Debe seleccionar un empleado para programar el turno."
+
+    fecha_str = str(datos.get("fecha") or "").strip()
+    if not fecha_str:
+        return "La fecha del turno es obligatoria (formato YYYY-MM-DD)."
+    try:
+        datetime.strptime(fecha_str, "%Y-%m-%d")
+    except ValueError:
+        return "Formato inválido en fecha de turno. Utilice YYYY-MM-DD."
+
+    h_ini_str = str(datos.get("hora_inicio") or "").strip()
+    h_fin_str = str(datos.get("hora_fin") or "").strip()
+    if not h_ini_str or not h_fin_str:
+        return "Las horas de inicio y fin son obligatorias (formato HH:MI)."
+
+    try:
+        t_ini = datetime.strptime(h_ini_str, "%H:%M")
+        t_fin = datetime.strptime(h_fin_str, "%H:%M")
+    except ValueError:
+        return "Formato inválido en horas del turno. Utilice formato HH:MI (ej. 08:30)."
+
+    if t_fin <= t_ini:
+        return "La hora de fin debe ser posterior a la hora de inicio en el mismo día."
+
+    duracion_horas = (t_fin - t_ini).total_seconds() / 3600.0
+    if duracion_horas > 16.0:
+        return f"La duración del turno ({duracion_horas:.1f} horas) excede el límite máximo de 16 horas continuas (normativa MTA)."
+
+    conflicto = validar_traslape_turno(int(emp_id), fecha_str, h_ini_str, h_fin_str, excluir_id_turno=id_turno)
+    if conflicto:
+        return (
+            f"Conflicto de traslape: El empleado ya tiene asignado el turno {conflicto.get('CODIGO_TURNO', '')} "
+            f"({conflicto.get('INI', '')} - {conflicto.get('FIN', '')}) en esa misma franja horaria."
+        )
+
+    return None
+
+
 def crear_turno(datos: Dict[str, Any]) -> Dict[str, Any]:
     """
     Programa un nuevo turno laboral para un empleado, validando estrictamente
-    que no exista traslape con otro turno asignado en la misma fecha y horario.
+    que no exista traslape con otro turno asignado en la misma fecha y horario,
+    que las horas no estén invertidas y que no supere 16 horas de labor.
     """
+    err_val = _validar_datos_turno(datos)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     emp_id = int(datos["empleado_id"])
     fecha = datos["fecha"].strip()
     h_ini = datos["hora_inicio"].strip()
     h_fin = datos["hora_fin"].strip()
-
-    # 1. Detección inmediata de traslape
-    conflicto = validar_traslape_turno(emp_id, fecha, h_ini, h_fin)
-    if conflicto:
-        return {
-            "success": False,
-            "error": f"Conflicto de traslape: El empleado ya tiene programado el turno {conflicto['CODIGO_TURNO']} ({conflicto['INI']} - {conflicto['FIN']}) en esa misma franja horaria."
-        }
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -698,19 +980,17 @@ def crear_turno(datos: Dict[str, Any]) -> Dict[str, Any]:
 
 def modificar_turno(id_turno: int, datos: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Actualiza la programación de un turno verificando que no genere solapamientos.
+    Actualiza la programación de un turno verificando que no genere solapamientos
+    ni viole la duración máxima de 16 horas.
     """
+    err_val = _validar_datos_turno(datos, id_turno=id_turno)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     emp_id = int(datos["empleado_id"])
     fecha = datos["fecha"].strip()
     h_ini = datos["hora_inicio"].strip()
     h_fin = datos["hora_fin"].strip()
-
-    conflicto = validar_traslape_turno(emp_id, fecha, h_ini, h_fin, excluir_id_turno=id_turno)
-    if conflicto:
-        return {
-            "success": False,
-            "error": f"Conflicto de traslape: El empleado ya tiene asignado el turno {conflicto['CODIGO_TURNO']} ({conflicto['INI']} - {conflicto['FIN']}) en ese horario."
-        }
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -747,6 +1027,40 @@ def modificar_turno(id_turno: int, datos: Dict[str, Any]) -> Dict[str, Any]:
     finally:
         cursor.close()
         conn.close()
+
+
+def get_actividades_y_turnos_empleado(id_empleado: int) -> List[Dict[str, Any]]:
+    """
+    Retorna el historial unificado y cronológico de actividad operativa de un empleado:
+    combina sus turnos laborales asignados y sus viajes despachados como maquinista.
+    """
+    sql = """
+        SELECT * FROM (
+            SELECT
+                'Turno' AS tipo_actividad,
+                t.codigo_turno AS identificador,
+                TO_CHAR(t.fecha, 'YYYY-MM-DD') AS fecha,
+                TO_CHAR(t.hora_inicio, 'HH24:MI') || ' - ' || TO_CHAR(t.hora_fin, 'HH24:MI') AS horario,
+                t.tipo_lugar || ': ' || NVL(t.funcion, 'Servicio General') AS detalle,
+                t.estado_asistencia AS estado
+            FROM TURNO t
+            WHERE t.empleado_id = :emp_id1
+            UNION ALL
+            SELECT
+                'Viaje Despachado' AS tipo_actividad,
+                vp.numero_viaje AS identificador,
+                TO_CHAR(vp.fecha, 'YYYY-MM-DD') AS fecha,
+                TO_CHAR(vp.hora_prog_salida, 'HH24:MI') || ' - ' || TO_CHAR(vp.hora_prog_llegada, 'HH24:MI') AS horario,
+                'Línea ' || l.codigo || ' (' || l.nombre || ')' AS detalle,
+                vp.estado AS estado
+            FROM VIAJE_PROGRAMADO vp
+            JOIN RUTA r ON vp.ruta_id = r.id_ruta
+            JOIN LINEA l ON r.linea_id = l.id_linea
+            WHERE vp.conductor_id = :emp_id2
+        )
+        ORDER BY fecha DESC, horario DESC
+    """
+    return _query_rows(sql, {"emp_id1": id_empleado, "emp_id2": id_empleado})
 
 
 def eliminar_turno(id_turno: int) -> Dict[str, Any]:
@@ -1193,12 +1507,12 @@ def get_kpis_personal() -> Dict[str, int]:
     if rows:
         r = rows[0]
         return {
-            "total_empleados": int(r.get("TOTAL_EMPLEADOS") or 0),
-            "empleados_activos": int(r.get("EMPLEADOS_ACTIVOS") or 0),
-            "total_conductores": int(r.get("TOTAL_CONDUCTORES") or 0),
-            "cert_vigentes": int(r.get("CERT_VIGENTES") or 0),
-            "cert_vencidas": int(r.get("CERT_VENCIDAS") or 0),
-            "turnos_hoy": int(r.get("TURNOS_HOY") or 0),
+            "total_empleados": _safe_int(r.get("TOTAL_EMPLEADOS")),
+            "empleados_activos": _safe_int(r.get("EMPLEADOS_ACTIVOS")),
+            "total_conductores": _safe_int(r.get("TOTAL_CONDUCTORES")),
+            "cert_vigentes": _safe_int(r.get("CERT_VIGENTES")),
+            "cert_vencidas": _safe_int(r.get("CERT_VENCIDAS")),
+            "turnos_hoy": _safe_int(r.get("TURNOS_HOY")),
         }
     return {
         "total_empleados": 0, "empleados_activos": 0, "total_conductores": 0,

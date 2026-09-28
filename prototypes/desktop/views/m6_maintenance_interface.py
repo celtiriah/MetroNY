@@ -11,6 +11,7 @@ Cumple estrictamente con los 9 requerimientos oficiales y las Reglas de Negocio 
 8. Bloqueo de asignacion de trenes en mantenimiento a viajes (Regla 19).
 9. Integridad y auditoria historica de ordenes (Regla 25).
 """
+import re
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 
@@ -30,6 +31,9 @@ from qfluentwidgets import (
 )
 
 from services import m6_maintenance_service
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -111,16 +115,43 @@ class NuevaOrdenDialog(MessageBoxBase):
         self.txt_descripcion.setPlaceholderText("Detalle de las tareas tecnicas a realizar...")
         form.addRow("Descripción:", self.txt_descripcion)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Generar Orden")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(520)
 
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
     def validate(self) -> bool:
-        if not self.txt_descripcion.text().strip():
+        if not self.combo_equipo.currentData():
+            self.lbl_error.setText("Debe seleccionar un activo o equipo válido.")
+            self.lbl_error.show()
+            return False
+        desc = self.txt_descripcion.text().strip()
+        if len(desc) < 3:
+            self.lbl_error.setText("La descripción de las tareas técnicas debe contener al menos 3 caracteres.")
+            self.lbl_error.show()
             self.txt_descripcion.setFocus()
             return False
+        if len(desc) > 500:
+            self.lbl_error.setText("La descripción no puede exceder 500 caracteres.")
+            self.lbl_error.show()
+            self.txt_descripcion.setFocus()
+            return False
+        self.lbl_error.hide()
         return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
+
 
 
 class CompletarOrdenDialog(MessageBoxBase):
@@ -160,7 +191,11 @@ class CompletarOrdenDialog(MessageBoxBase):
         self.spin_dias = SpinBox(self)
         self.spin_dias.setRange(1, 730)
         self.spin_dias.setValue(90)
-        form.addRow("Próxima Revisión (Días):", self.spin_dias)
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
 
         lbl_notice = CaptionLabel(
             "Al completar la orden, el estado del activo (y del tren, si aplica) se restablecerá a 'Disponible' "
@@ -174,6 +209,37 @@ class CompletarOrdenDialog(MessageBoxBase):
         self.yesButton.setText("Confirmar Finalización")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(500)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
+    def validate(self) -> bool:
+        if self.spin_costo.value() < 0:
+            self.lbl_error.setText("El costo final auditado no puede ser negativo.")
+            self.lbl_error.show()
+            return False
+        ffin = self.txt_fecha_fin.text().strip()
+        if ffin:
+            valida = False
+            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    datetime.strptime(ffin, fmt)
+                    valida = True
+                    break
+                except ValueError:
+                    pass
+            if not valida:
+                self.lbl_error.setText("Formato de fecha inválido (use AAAA-MM-DD HH:MM).")
+                self.lbl_error.show()
+                self.txt_fecha_fin.setFocus()
+                return False
+        self.lbl_error.hide()
+        return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
+
 
 
 class CambiarEstadoOrdenDialog(MessageBoxBase):
@@ -288,16 +354,41 @@ class EquipoDialog(MessageBoxBase):
             self.txt_fecha_prox.setText(_safe_str(self.equipo.get("FECHA_PROXIMA_REVISION")))
         form.addRow("Próxima Revisión:", self.txt_fecha_prox)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Guardar Activo")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(500)
 
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
     def validate(self) -> bool:
         if not self.txt_codigo.text().strip():
+            self.lbl_error.setText("El código de equipo es obligatorio.")
+            self.lbl_error.show()
             self.txt_codigo.setFocus()
             return False
+        fprox = self.txt_fecha_prox.text().strip()
+        if fprox:
+            try:
+                datetime.strptime(fprox, "%Y-%m-%d")
+            except ValueError:
+                self.lbl_error.setText("Formato de fecha inválido (use AAAA-MM-DD).")
+                self.lbl_error.show()
+                self.txt_fecha_prox.setFocus()
+                return False
+        self.lbl_error.hide()
         return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 class AsignarTecnicoDialog(MessageBoxBase):
@@ -334,10 +425,31 @@ class AsignarTecnicoDialog(MessageBoxBase):
         ])
         form.addRow("Rol en la Orden:", self.combo_rol)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Asignar a Cuadrilla")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(440)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
+    def validate(self) -> bool:
+        if not self.combo_tecnico.currentData():
+            self.lbl_error.setText("Debe seleccionar un técnico de la lista.")
+            self.lbl_error.show()
+            return False
+        self.lbl_error.hide()
+        return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 class ConsumoRepuestoDialog(MessageBoxBase):
@@ -360,10 +472,16 @@ class ConsumoRepuestoDialog(MessageBoxBase):
             cod = _safe_str(rep.get("CODIGO"))
             nom = _safe_str(rep.get("NOMBRE"))
             costo = _safe_float(rep.get("COSTO_UNITARIO"))
+            stock = _safe_int(rep.get("STOCK_DISPONIBLE"), 0)
             id_rep = _safe_int(rep.get("ID_REPUESTO"))
-            self.combo_repuesto.addItem(f"{cod} - {nom} (${costo:.2f})", userData=id_rep)
+            self.combo_repuesto.addItem(f"{cod} - {nom} (${costo:.2f}) [Stock: {stock}]", userData=id_rep)
         self.combo_repuesto.currentIndexChanged.connect(self.update_subtotal)
         form.addRow("Pieza / Repuesto:", self.combo_repuesto)
+
+        # Disponibilidad en almacen
+        self.lbl_stock_info = BodyLabel("Stock disponible en almacén: -", self)
+        self.lbl_stock_info.setStyleSheet("color: #0099FF; font-weight: bold;")
+        form.addRow("Disponibilidad:", self.lbl_stock_info)
 
         # Cantidad
         self.spin_cantidad = SpinBox(self)
@@ -376,18 +494,53 @@ class ConsumoRepuestoDialog(MessageBoxBase):
         self.lbl_subtotal = StrongBodyLabel("Subtotal Estimado: $0.00", self)
         form.addRow("Impacto en Costo:", self.lbl_subtotal)
 
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Registrar Pieza")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(480)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
+
         self.update_subtotal()
 
     def update_subtotal(self):
         idx = self.combo_repuesto.currentIndex()
         if idx >= 0 and idx < len(self.repuestos):
             costo_u = _safe_float(self.repuestos[idx].get("COSTO_UNITARIO"))
+            stock = _safe_int(self.repuestos[idx].get("STOCK_DISPONIBLE"), 0)
             cant = self.spin_cantidad.value()
+            self.lbl_stock_info.setText(f"{stock} unidad(es) disponibles en almacén")
             self.lbl_subtotal.setText(f"Subtotal Estimado: ${cant * costo_u:.2f}")
+
+    def validate(self) -> bool:
+        idx = self.combo_repuesto.currentIndex()
+        if idx < 0 or idx >= len(self.repuestos):
+            self.lbl_error.setText("Seleccione una pieza válida de repuesto.")
+            self.lbl_error.show()
+            return False
+        stock = _safe_int(self.repuestos[idx].get("STOCK_DISPONIBLE"), 0)
+        cant = self.spin_cantidad.value()
+        if cant > stock:
+            self.lbl_error.setText(f"Stock insuficiente en almacén (disponible: {stock}, solicitado: {cant}).")
+            self.lbl_error.show()
+            return False
+        if cant <= 0:
+            self.lbl_error.setText("La cantidad debe ser mayor a cero.")
+            self.lbl_error.show()
+            return False
+        self.lbl_error.hide()
+        return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
 
 
 class RepuestoDialog(MessageBoxBase):
@@ -407,7 +560,7 @@ class RepuestoDialog(MessageBoxBase):
         form.setSpacing(10)
 
         self.txt_codigo = LineEdit(self)
-        self.txt_codigo.setPlaceholderText("Ej: REP-TRK-10, REP-MOT-05")
+        self.txt_codigo.setPlaceholderText("Ej: REP-1001 o REP-BRK-01")
         if self.repuesto:
             self.txt_codigo.setText(_safe_str(self.repuesto.get("CODIGO")))
         form.addRow("Código de Pieza:", self.txt_codigo)
@@ -426,15 +579,65 @@ class RepuestoDialog(MessageBoxBase):
             self.spin_costo.setValue(50.0)
         form.addRow("Costo Unitario ($):", self.spin_costo)
 
+        self.spin_stock = SpinBox(self)
+        self.spin_stock.setRange(0, 99999)
+        if self.repuesto:
+            self.spin_stock.setValue(_safe_int(self.repuesto.get("STOCK_DISPONIBLE"), 50))
+        else:
+            self.spin_stock.setValue(50)
+        form.addRow("Stock Inicial Disponible:", self.spin_stock)
+
+        # Label de error
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.lbl_error.hide()
+        form.addRow("", self.lbl_error)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Guardar")
         self.cancelButton.setText("Cancelar")
-        self.widget.setMinimumWidth(440)
+        self.widget.setMinimumWidth(460)
+
+        self.yesButton.clicked.disconnect()
+        self.yesButton.clicked.connect(self._on_confirm)
 
     def validate(self) -> bool:
-        if not self.txt_codigo.text().strip() or not self.txt_nombre.text().strip():
+        cod = self.txt_codigo.text().strip().upper()
+        if not re.match(r"^REP-[A-Z0-9]{2,8}(-[A-Z0-9]{1,4})?$", cod):
+            self.lbl_error.setText("El código debe tener el formato estándar (ej. REP-1001 o REP-BRK-01).")
+            self.lbl_error.show()
+            self.txt_codigo.setFocus()
             return False
+
+        nom = self.txt_nombre.text().strip()
+        if len(nom) < 3:
+            self.lbl_error.setText("La denominación técnica debe contener al menos 3 caracteres.")
+            self.lbl_error.show()
+            self.txt_nombre.setFocus()
+            return False
+        if len(nom) > 100:
+            self.lbl_error.setText("La denominación no puede exceder 100 caracteres.")
+            self.lbl_error.show()
+            self.txt_nombre.setFocus()
+            return False
+
+        if self.spin_costo.value() <= 0:
+            self.lbl_error.setText("El costo unitario debe ser mayor a cero.")
+            self.lbl_error.show()
+            return False
+
+        if self.spin_stock.value() < 0:
+            self.lbl_error.setText("El stock no puede ser negativo.")
+            self.lbl_error.show()
+            return False
+
+        self.lbl_error.hide()
         return True
+
+    def _on_confirm(self):
+        if self.validate():
+            self.accept()
+
 
 
 # ==============================================================================
@@ -606,17 +809,7 @@ class MaintenanceInterface(QWidget):
         self.table_ordenes.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_ordenes.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
 
-        header = self.table_ordenes.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_ordenes)
 
         self.table_ordenes.itemSelectionChanged.connect(self.on_orden_selected)
         v_layout.addWidget(self.table_ordenes, stretch=1)
@@ -649,15 +842,16 @@ class MaintenanceInterface(QWidget):
 
             self.table_ordenes.setItem(r, 0, QTableWidgetItem(num))
             self.table_ordenes.setItem(r, 1, QTableWidgetItem(cod_eq))
-            self.table_ordenes.setItem(r, 2, QTableWidgetItem(tipo_trab))
+            self.table_ordenes.setCellWidget(r, 2, StatusBadge(tipo_trab, self.table_ordenes))
             self.table_ordenes.setItem(r, 3, QTableWidgetItem(desc))
-            self.table_ordenes.setItem(r, 4, QTableWidgetItem(prio))
+            self.table_ordenes.setCellWidget(r, 4, StatusBadge(prio, self.table_ordenes))
             self.table_ordenes.setItem(r, 5, QTableWidgetItem(tec))
             self.table_ordenes.setItem(r, 6, QTableWidgetItem(f_prog))
             self.table_ordenes.setItem(r, 7, QTableWidgetItem(f"${costo:.2f}"))
-            self.table_ordenes.setItem(r, 8, QTableWidgetItem(estado))
+            self.table_ordenes.setCellWidget(r, 8, StatusBadge(estado, self.table_ordenes))
 
         self.table_ordenes.blockSignals(False)
+        auto_fit_table_columns(self.table_ordenes)
         self.refresh_kpis()
 
     def refresh_kpis(self):
@@ -727,6 +921,15 @@ class MaintenanceInterface(QWidget):
         if not orden:
             return
 
+        if _safe_str(orden.get("ESTADO")) in ("Completada", "Cerrada"):
+            InfoBar.warning(
+                "Orden Inmutable",
+                "Las órdenes completadas o cerradas forman parte del registro histórico inmutable y no pueden modificarse.",
+                parent=self.window(),
+                duration=4000
+            )
+            return
+
         dialog = CambiarEstadoOrdenDialog(_safe_str(orden.get("ESTADO")), self.window())
         if dialog.exec():
             nuevo_est = dialog.combo_estado.currentText()
@@ -744,6 +947,15 @@ class MaintenanceInterface(QWidget):
 
         orden = next((o for o in self.ordenes_cache if _safe_int(o.get("ID_ORDEN")) == self.selected_orden_id), None)
         if not orden:
+            return
+
+        if _safe_str(orden.get("ESTADO")) in ("Completada", "Cerrada"):
+            InfoBar.information(
+                "Orden Ya Finalizada",
+                f"La orden {orden.get('NUMERO_ORDEN')} ya se encuentra completada/cerrada.",
+                parent=self.window(),
+                duration=3000
+            )
             return
 
         dialog = CompletarOrdenDialog(orden, self.window())
@@ -768,6 +980,19 @@ class MaintenanceInterface(QWidget):
     def handle_cancelar_orden(self):
         if not self.selected_orden_id:
             InfoBar.warning("Selección Requerida", "Seleccione la orden que desea cancelar.", parent=self.window(), duration=3000)
+            return
+
+        orden = next((o for o in self.ordenes_cache if _safe_int(o.get("ID_ORDEN")) == self.selected_orden_id), None)
+        if not orden:
+            return
+
+        if _safe_str(orden.get("ESTADO")) in ("Completada", "Cerrada"):
+            InfoBar.warning(
+                "Orden Inmutable",
+                "No se puede cancelar una orden que ya ha sido completada formalmente.",
+                parent=self.window(),
+                duration=4000
+            )
             return
 
         box = MessageBox("Cancelar Orden", "¿Está seguro de que desea cancelar esta orden de mantenimiento? Esta acción restaurará la disponibilidad del activo si no existen otros trabajos activos.", self.window())
@@ -834,17 +1059,7 @@ class MaintenanceInterface(QWidget):
         self.table_equipos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_equipos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
 
-        header = self.table_equipos.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_equipos)
 
         v_layout.addWidget(self.table_equipos, stretch=1)
         self.stack_views.addWidget(tab_widget)
@@ -880,12 +1095,13 @@ class MaintenanceInterface(QWidget):
             self.table_equipos.setItem(r, 2, QTableWidgetItem(ubic))
             self.table_equipos.setItem(r, 3, QTableWidgetItem(ref_nom))
             self.table_equipos.setItem(r, 4, QTableWidgetItem(fab_mod))
-            self.table_equipos.setItem(r, 5, QTableWidgetItem(estado))
+            self.table_equipos.setCellWidget(r, 5, StatusBadge(estado, self.table_equipos))
             self.table_equipos.setItem(r, 6, QTableWidgetItem(ult))
             self.table_equipos.setItem(r, 7, QTableWidgetItem(prox))
-            self.table_equipos.setItem(r, 8, QTableWidgetItem(alerta))
+            self.table_equipos.setCellWidget(r, 8, StatusBadge(alerta, self.table_equipos))
 
         self.table_equipos.blockSignals(False)
+        auto_fit_table_columns(self.table_equipos)
 
     def handle_nuevo_equipo(self):
         dialog = EquipoDialog(None, self.window())
@@ -959,7 +1175,34 @@ class MaintenanceInterface(QWidget):
         id_eq = _safe_int(equipo.get("ID_EQUIPO"))
         cod_eq = _safe_str(equipo.get("CODIGO_EQUIPO"))
 
-        box = MessageBox("Eliminar Activo", f"¿Confirma la eliminación del activo {cod_eq}? Solo será eliminado si no posee órdenes históricas asociadas.", self.window())
+        deps = m6_maintenance_service.verificar_dependencias_equipo(id_eq)
+        if deps.get("tiene_dependencias"):
+            tot = deps.get("total_ordenes", 0)
+            act = deps.get("ordenes_activas", 0)
+            if act > 0:
+                InfoBar.error(
+                    "Órdenes Activas",
+                    f"El activo {cod_eq} tiene {act} orden(es) activa(s) en ejecución. No se puede eliminar ni dar de baja.",
+                    parent=self.window(),
+                    duration=5000
+                )
+                return
+
+            box = MessageBox(
+                "Historial de Mantenimiento Detectado",
+                f"El activo {cod_eq} registra {tot} orden(es) de mantenimiento histórica(s) y no puede eliminarse físicamente por integridad referencial.\n\n¿Desea darlo de baja formalmente (cambiar estado a 'Retirado')?",
+                self.window()
+            )
+            if box.exec():
+                res = m6_maintenance_service.dar_de_baja_equipo(id_eq)
+                if res.get("success"):
+                    InfoBar.success("Activo Retirado", res.get("mensaje", ""), parent=self.window(), duration=3000)
+                    self.refresh_equipos()
+                else:
+                    InfoBar.error("Error al Dar de Baja", res.get("error", ""), parent=self.window(), duration=5000)
+            return
+
+        box = MessageBox("Eliminar Activo", f"¿Confirma la eliminación física del activo {cod_eq} del sistema?", self.window())
         if box.exec():
             res = m6_maintenance_service.eliminar_equipo(id_eq)
             if res.get("success"):
@@ -1001,11 +1244,7 @@ class MaintenanceInterface(QWidget):
         self.table_roster.setColumnCount(3)
         self.table_roster.setHorizontalHeaderLabels(["Nº Emp.", "Técnico de Mantenimiento", "Órdenes Activas"])
         self.table_roster.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        roster_header = self.table_roster.horizontalHeader()
-        if roster_header is not None:
-            roster_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            roster_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            roster_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_roster)
         left_layout.addWidget(self.table_roster, stretch=1)
 
         splitter.addWidget(left_widget)
@@ -1035,13 +1274,7 @@ class MaintenanceInterface(QWidget):
         self.table_orden_tecnicos.setHorizontalHeaderLabels(["Nº Empleado", "Nombre Completo", "Teléfono", "Rol en la Orden"])
         self.table_orden_tecnicos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_orden_tecnicos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-
-        ord_tec_header = self.table_orden_tecnicos.horizontalHeader()
-        if ord_tec_header is not None:
-            ord_tec_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            ord_tec_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            ord_tec_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            ord_tec_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_orden_tecnicos)
 
         right_layout.addWidget(self.table_orden_tecnicos, stretch=1)
         splitter.addWidget(right_widget)
@@ -1077,6 +1310,7 @@ class MaintenanceInterface(QWidget):
             self.table_roster.setItem(r, 1, QTableWidgetItem(nom))
             self.table_roster.setItem(r, 2, QTableWidgetItem(ord_act))
         self.table_roster.blockSignals(False)
+        auto_fit_table_columns(self.table_roster)
 
         self.on_cuadrilla_orden_changed()
 
@@ -1102,8 +1336,9 @@ class MaintenanceInterface(QWidget):
             self.table_orden_tecnicos.setItem(r, 0, it_num)
             self.table_orden_tecnicos.setItem(r, 1, QTableWidgetItem(nom))
             self.table_orden_tecnicos.setItem(r, 2, QTableWidgetItem(tel))
-            self.table_orden_tecnicos.setItem(r, 3, QTableWidgetItem(rol))
+            self.table_orden_tecnicos.setCellWidget(r, 3, StatusBadge(rol, self.table_orden_tecnicos))
         self.table_orden_tecnicos.blockSignals(False)
+        auto_fit_table_columns(self.table_orden_tecnicos)
 
         self.lbl_cuadrilla_orden_info.setText(f"Mostrando {len(tecnicos_orden)} técnico(s) asignados a la orden ID {id_ord}.")
 
@@ -1190,17 +1425,11 @@ class MaintenanceInterface(QWidget):
         left_layout.addWidget(self.search_repuestos)
 
         self.table_catalogo_repuestos = TableWidget(left_widget)
-        self.table_catalogo_repuestos.setColumnCount(4)
-        self.table_catalogo_repuestos.setHorizontalHeaderLabels(["Código", "Denominación de Pieza", "Costo ($)", "Uso Histórico"])
+        self.table_catalogo_repuestos.setColumnCount(5)
+        self.table_catalogo_repuestos.setHorizontalHeaderLabels(["Código", "Denominación de Pieza", "Costo ($)", "Stock Disp.", "Uso Histórico"])
         self.table_catalogo_repuestos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_catalogo_repuestos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-
-        cat_header = self.table_catalogo_repuestos.horizontalHeader()
-        if cat_header is not None:
-            cat_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            cat_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            cat_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            cat_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_catalogo_repuestos)
 
         left_layout.addWidget(self.table_catalogo_repuestos, stretch=1)
         splitter.addWidget(left_widget)
@@ -1238,14 +1467,7 @@ class MaintenanceInterface(QWidget):
         self.table_orden_repuestos.setHorizontalHeaderLabels(["Código", "Pieza", "Costo Unit.", "Cantidad", "Total ($)"])
         self.table_orden_repuestos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_orden_repuestos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-
-        ord_rep_header = self.table_orden_repuestos.horizontalHeader()
-        if ord_rep_header is not None:
-            ord_rep_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            ord_rep_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            ord_rep_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            ord_rep_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            ord_rep_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_orden_repuestos)
 
         right_layout.addWidget(self.table_orden_repuestos, stretch=1)
 
@@ -1270,6 +1492,7 @@ class MaintenanceInterface(QWidget):
             cod = _safe_str(row.get("CODIGO"))
             nom = _safe_str(row.get("NOMBRE"))
             costo = _safe_float(row.get("COSTO_UNITARIO"))
+            stock = _safe_int(row.get("STOCK_DISPONIBLE"), 0)
             total_c = _safe_str(row.get("TOTAL_CONSUMIDO"))
 
             it_cod = QTableWidgetItem(cod)
@@ -1277,8 +1500,10 @@ class MaintenanceInterface(QWidget):
             self.table_catalogo_repuestos.setItem(r, 0, it_cod)
             self.table_catalogo_repuestos.setItem(r, 1, QTableWidgetItem(nom))
             self.table_catalogo_repuestos.setItem(r, 2, QTableWidgetItem(f"${costo:.2f}"))
-            self.table_catalogo_repuestos.setItem(r, 3, QTableWidgetItem(total_c))
+            self.table_catalogo_repuestos.setItem(r, 3, QTableWidgetItem(f"{stock} un."))
+            self.table_catalogo_repuestos.setItem(r, 4, QTableWidgetItem(total_c))
         self.table_catalogo_repuestos.blockSignals(False)
+        auto_fit_table_columns(self.table_catalogo_repuestos)
 
         # 2. Selector de orden
         ordenes = m6_maintenance_service.get_ordenes()
@@ -1325,6 +1550,7 @@ class MaintenanceInterface(QWidget):
             self.table_orden_repuestos.setItem(r, 3, QTableWidgetItem(str(cant)))
             self.table_orden_repuestos.setItem(r, 4, QTableWidgetItem(f"${costo_t:.2f}"))
         self.table_orden_repuestos.blockSignals(False)
+        auto_fit_table_columns(self.table_orden_repuestos)
 
         costo_fn = m6_maintenance_service.calcular_costo_total_orden(int(id_ord))
         self.lbl_costo_orden_consolidado.setText(f"Costo Total Consolidado (Base + Repuestos): ${costo_fn:,.2f}")
@@ -1337,7 +1563,8 @@ class MaintenanceInterface(QWidget):
             res = m6_maintenance_service.crear_repuesto(
                 codigo=dialog.txt_codigo.text(),
                 nombre=dialog.txt_nombre.text(),
-                costo_unitario=dialog.spin_costo.value()
+                costo_unitario=dialog.spin_costo.value(),
+                stock_disponible=dialog.spin_stock.value()
             )
             if res.get("success"):
                 InfoBar.success("Pieza Registrada", res.get("mensaje", ""), parent=self.window(), duration=3000)
@@ -1363,7 +1590,8 @@ class MaintenanceInterface(QWidget):
                 id_repuesto=id_rep,
                 codigo=dialog.txt_codigo.text(),
                 nombre=dialog.txt_nombre.text(),
-                costo_unitario=dialog.spin_costo.value()
+                costo_unitario=dialog.spin_costo.value(),
+                stock_disponible=dialog.spin_stock.value()
             )
             if res.get("success"):
                 InfoBar.success("Repuesto Actualizado", res.get("mensaje", ""), parent=self.window(), duration=3000)
@@ -1381,6 +1609,17 @@ class MaintenanceInterface(QWidget):
         repuesto = self.repuestos_cache[r]
         id_rep = _safe_int(repuesto.get("ID_REPUESTO"))
         cod = _safe_str(repuesto.get("CODIGO"))
+
+        deps = m6_maintenance_service.verificar_dependencias_repuesto(id_rep)
+        if deps.get("tiene_dependencias"):
+            tot = deps.get("total_consumos", 0)
+            InfoBar.error(
+                "Restricción de Integridad",
+                f"El repuesto {cod} registra {tot} consumo(s) en órdenes de trabajo históricas o activas. No se puede eliminar por integridad referencial.",
+                parent=self.window(),
+                duration=5000
+            )
+            return
 
         box = MessageBox("Eliminar Repuesto", f"¿Confirma la eliminación del repuesto {cod} del catálogo?", self.window())
         if box.exec():
@@ -1413,6 +1652,7 @@ class MaintenanceInterface(QWidget):
                 InfoBar.success("Consumo Registrado", res.get("mensaje", ""), parent=self.window(), duration=3000)
                 self.on_rep_orden_changed()
                 self.refresh_kpis()
+                self.refresh_repuestos()
             else:
                 InfoBar.error("Error", res.get("error", ""), parent=self.window(), duration=4000)
 
@@ -1435,6 +1675,7 @@ class MaintenanceInterface(QWidget):
                 InfoBar.success("Partida Removida", res.get("mensaje", ""), parent=self.window(), duration=3000)
                 self.on_rep_orden_changed()
                 self.refresh_kpis()
+                self.refresh_repuestos()
             else:
                 InfoBar.error("Error", res.get("error", ""), parent=self.window(), duration=4000)
 
@@ -1462,16 +1703,7 @@ class MaintenanceInterface(QWidget):
             "Tipo Trabajo", "Prioridad", "Técnico Responsable", "Ingreso a Taller"
         ])
         self.table_taller.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        taller_header = self.table_taller.horizontalHeader()
-        if taller_header is not None:
-            taller_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            taller_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            taller_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            taller_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            taller_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            taller_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-            taller_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-            taller_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_taller)
         taller_layout.addWidget(self.table_taller, stretch=1)
         v_layout.addWidget(card_taller, stretch=1)
 
@@ -1489,12 +1721,7 @@ class MaintenanceInterface(QWidget):
         self.table_fuera.setColumnCount(4)
         self.table_fuera.setHorizontalHeaderLabels(["Código", "Tipo", "Ubicación", "Estado"])
         self.table_fuera.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        fuera_header = self.table_fuera.horizontalHeader()
-        if fuera_header is not None:
-            fuera_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            fuera_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            fuera_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            fuera_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        configure_interactive_table(self.table_fuera)
         fuera_layout.addWidget(self.table_fuera, stretch=1)
         bottom_splitter.addWidget(card_fuera)
 
@@ -1509,12 +1736,7 @@ class MaintenanceInterface(QWidget):
         self.table_vencidas.setColumnCount(4)
         self.table_vencidas.setHorizontalHeaderLabels(["Código", "Tipo", "Próxima Revisión", "Días Restantes"])
         self.table_vencidas.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        vencidas_header = self.table_vencidas.horizontalHeader()
-        if vencidas_header is not None:
-            vencidas_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            vencidas_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            vencidas_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            vencidas_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_vencidas)
         vencidas_layout.addWidget(self.table_vencidas, stretch=1)
         bottom_splitter.addWidget(card_vencidas)
 
@@ -1534,11 +1756,12 @@ class MaintenanceInterface(QWidget):
             self.table_taller.setItem(r, 1, QTableWidgetItem(_safe_str(t.get("NOMBRE_MODELO"))))
             self.table_taller.setItem(r, 2, QTableWidgetItem(_safe_str(t.get("DEPOSITO"))))
             self.table_taller.setItem(r, 3, QTableWidgetItem(_safe_str(t.get("NUMERO_ORDEN"))))
-            self.table_taller.setItem(r, 4, QTableWidgetItem(_safe_str(t.get("TIPO_MANTENIMIENTO"))))
-            self.table_taller.setItem(r, 5, QTableWidgetItem(_safe_str(t.get("PRIORIDAD"))))
+            self.table_taller.setCellWidget(r, 4, StatusBadge(_safe_str(t.get("TIPO_MANTENIMIENTO")), self.table_taller))
+            self.table_taller.setCellWidget(r, 5, StatusBadge(_safe_str(t.get("PRIORIDAD")), self.table_taller))
             self.table_taller.setItem(r, 6, QTableWidgetItem(_safe_str(t.get("TECNICO_RESPONSABLE"))))
             self.table_taller.setItem(r, 7, QTableWidgetItem(_safe_str(t.get("FECHA_INGRESO_TALLER"))))
         self.table_taller.blockSignals(False)
+        auto_fit_table_columns(self.table_taller)
 
         # 2. Equipos fuera de servicio
         equipos_fuera = m6_maintenance_service.get_equipos_fuera_servicio()
@@ -1548,8 +1771,9 @@ class MaintenanceInterface(QWidget):
             self.table_fuera.setItem(r, 0, QTableWidgetItem(_safe_str(eq.get("CODIGO_EQUIPO"))))
             self.table_fuera.setItem(r, 1, QTableWidgetItem(_safe_str(eq.get("TIPO_EQUIPO"))))
             self.table_fuera.setItem(r, 2, QTableWidgetItem(_safe_str(eq.get("UBICACION"))))
-            self.table_fuera.setItem(r, 3, QTableWidgetItem(_safe_str(eq.get("ESTADO"))))
+            self.table_fuera.setCellWidget(r, 3, StatusBadge(_safe_str(eq.get("ESTADO")), self.table_fuera))
         self.table_fuera.blockSignals(False)
+        auto_fit_table_columns(self.table_fuera)
 
         # 3. Inspecciones vencidas
         vencidas = m6_maintenance_service.get_equipos_inspeccion_vencida()
@@ -1561,8 +1785,9 @@ class MaintenanceInterface(QWidget):
             self.table_vencidas.setItem(r, 0, QTableWidgetItem(_safe_str(v.get("CODIGO_EQUIPO"))))
             self.table_vencidas.setItem(r, 1, QTableWidgetItem(_safe_str(v.get("TIPO_EQUIPO"))))
             self.table_vencidas.setItem(r, 2, QTableWidgetItem(_safe_str(v.get("FECHA_PROXIMA_REVISION"), "Sin Programar")))
-            self.table_vencidas.setItem(r, 3, QTableWidgetItem(dias_str))
+            self.table_vencidas.setCellWidget(r, 3, StatusBadge(dias_str, self.table_vencidas))
         self.table_vencidas.blockSignals(False)
+        auto_fit_table_columns(self.table_vencidas)
 
     # ==========================================================================
     # CARGA GLOBAL DESDE MAIN WINDOW

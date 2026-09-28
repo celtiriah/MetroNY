@@ -28,6 +28,9 @@ from qfluentwidgets import (
 )
 
 from services import m2_routes_service
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -366,7 +369,7 @@ class ProgramarViajeDialog(MessageBoxBase):
         form.addRow("Maquinista / Conductor:", self.combo_conductor)
 
         self.combo_estado = ComboBox(self)
-        self.combo_estado.addItems(["Programado", "En Abordaje", "En Curso", "Retrasado", "Completado", "Cancelado"])
+        self.combo_estado.addItems(["Programado", "En Abordaje", "En Curso", "Retrasado", "Reprogramado", "Completado", "Cancelado"])
         self.combo_estado.setCurrentText("Programado")
         form.addRow("Estado Operativo:", self.combo_estado)
 
@@ -375,7 +378,63 @@ class ProgramarViajeDialog(MessageBoxBase):
         self.spin_pasajeros.setValue(850)
         form.addRow("Pasajeros Estimados:", self.spin_pasajeros)
 
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        form.addRow(self.lbl_error)
+
         self.viewLayout.addLayout(form)
+
+    def validate(self) -> bool:
+        """Valida que la fecha y horarios del despacho sean coherentes."""
+        fecha_str = self.txt_fecha.text().strip()
+        salida_str = self.txt_salida.text().strip()
+        llegada_str = self.txt_llegada.text().strip()
+
+        if not fecha_str:
+            self.lbl_error.setText("La fecha del viaje es obligatoria (YYYY-MM-DD).")
+            self.lbl_error.show()
+            self.txt_fecha.setFocus()
+            return False
+
+        try:
+            f_dt = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+            if f_dt < date(2020, 1, 1):
+                self.lbl_error.setText("Fecha inválida: No se permite programar viajes en el pasado remoto (< 2020).")
+                self.lbl_error.show()
+                self.txt_fecha.setFocus()
+                return False
+        except ValueError:
+            self.lbl_error.setText("Formato de fecha inválido. Utilice el estándar YYYY-MM-DD.")
+            self.lbl_error.show()
+            self.txt_fecha.setFocus()
+            return False
+
+        try:
+            t_sal = datetime.strptime(salida_str, "%H:%M").time()
+            t_lleg = datetime.strptime(llegada_str, "%H:%M").time()
+            if t_lleg <= t_sal:
+                self.lbl_error.setText("La hora de llegada programada debe ser posterior a la hora de salida.")
+                self.lbl_error.show()
+                self.txt_llegada.setFocus()
+                return False
+        except ValueError:
+            self.lbl_error.setText("Formato de hora inválido. Utilice el formato HH:MM (ej: 08:30).")
+            self.lbl_error.show()
+            return False
+
+        if not self.combo_tren.currentData():
+            self.lbl_error.setText("Debe seleccionar un tren activo y disponible.")
+            self.lbl_error.show()
+            return False
+
+        if not self.combo_conductor.currentData():
+            self.lbl_error.setText("Debe asignar un conductor certificado para el viaje.")
+            self.lbl_error.show()
+            return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         return {
@@ -449,8 +508,11 @@ class EditarViajeDialog(MessageBoxBase):
         form.addRow("Maquinista / Conductor:", self.combo_conductor)
 
         self.combo_estado = ComboBox(self)
-        self.combo_estado.addItems(["Programado", "En Abordaje", "En Curso", "Retrasado", "Completado", "Cancelado"])
-        self.combo_estado.setCurrentText(str(self.viaje_data.get("ESTADO", "Programado")))
+        estados = ["Programado", "En Abordaje", "En Curso", "Retrasado", "Reprogramado", "Completado", "Cancelado"]
+        self.combo_estado.addItems(estados)
+        curr_est = str(self.viaje_data.get("ESTADO", "Programado"))
+        if curr_est in estados:
+            self.combo_estado.setCurrentText(curr_est)
         form.addRow("Estado Operativo:", self.combo_estado)
 
         self.spin_pasajeros = SpinBox(self)
@@ -458,7 +520,53 @@ class EditarViajeDialog(MessageBoxBase):
         self.spin_pasajeros.setValue(_safe_int(self.viaje_data.get("CANTIDAD_ESTIMADA_PASAJEROS", 0), 0))
         form.addRow("Pasajeros Estimados:", self.spin_pasajeros)
 
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        form.addRow(self.lbl_error)
+
         self.viewLayout.addLayout(form)
+
+    def validate(self) -> bool:
+        """Valida que la fecha y horarios del viaje reprogramado sean válidos."""
+        fecha_str = self.txt_fecha.text().strip()
+        salida_str = self.txt_salida.text().strip()
+        llegada_str = self.txt_llegada.text().strip()
+
+        if not fecha_str:
+            self.lbl_error.setText("La fecha del viaje es obligatoria (formato YYYY-MM-DD).")
+            self.lbl_error.show()
+            self.txt_fecha.setFocus()
+            return False
+
+        try:
+            f_dt = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+            if f_dt < date(2020, 1, 1):
+                self.lbl_error.setText("Fecha inválida: No se permite reprogramar a fechas en el pasado remoto.")
+                self.lbl_error.show()
+                self.txt_fecha.setFocus()
+                return False
+        except ValueError:
+            self.lbl_error.setText("Formato de fecha inválido. Utilice el estándar YYYY-MM-DD.")
+            self.lbl_error.show()
+            self.txt_fecha.setFocus()
+            return False
+
+        try:
+            t_sal = datetime.strptime(salida_str, "%H:%M").time()
+            t_lleg = datetime.strptime(llegada_str, "%H:%M").time()
+            if t_lleg <= t_sal:
+                self.lbl_error.setText("La hora de llegada programada debe ser posterior a la hora de salida.")
+                self.lbl_error.show()
+                self.txt_llegada.setFocus()
+                return False
+        except ValueError:
+            self.lbl_error.setText("Formato de hora inválido. Utilice HH:MM (ej: 09:15).")
+            self.lbl_error.show()
+            return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         return {
@@ -594,9 +702,7 @@ class M2RoutesInterface(QWidget):
         self.table_rutas.setHorizontalHeaderLabels([
             "Codigo", "Linea", "Servicio", "Sentido", "Origen", "Destino", "Distancia", "Duracion", "Estado"
         ])
-        hr = self.table_rutas.horizontalHeader()
-        if hr is not None:
-            hr.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_rutas, min_col_width=75)
         self.table_rutas.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_rutas.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_rutas.itemSelectionChanged.connect(self.on_ruta_selected)
@@ -633,9 +739,7 @@ class M2RoutesInterface(QWidget):
         self.table_paradas.setHorizontalHeaderLabels([
             "Orden", "Codigo", "Nombre Estacion", "Distrito", "Hora Llegada", "Condicion de Parada", "Distancia Ant.", "Tiempo Ant."
         ])
-        hp = self.table_paradas.horizontalHeader()
-        if hp is not None:
-            hp.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_paradas, min_col_width=75)
         self.table_paradas.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_paradas.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         paradas_layout.addWidget(self.table_paradas)
@@ -679,9 +783,7 @@ class M2RoutesInterface(QWidget):
         self.table_horarios.setHorizontalHeaderLabels([
             "Dia de la Semana", "Hora Inicio", "Hora Fin", "Frecuencia (Intervalo)", "Tipo de Horario", "Vigencia Desde"
         ])
-        hh = self.table_horarios.horizontalHeader()
-        if hh is not None:
-            hh.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_horarios, min_col_width=80)
         self.table_horarios.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_horarios.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_horarios)
@@ -708,7 +810,7 @@ class M2RoutesInterface(QWidget):
 
         bar_v.addWidget(CaptionLabel("Estado:", tab_widget))
         self.combo_filtro_estado_viaje = ComboBox(tab_widget)
-        self.combo_filtro_estado_viaje.addItems(["(Todos)", "Programado", "En Curso", "Completado", "Retrasado", "Cancelado"])
+        self.combo_filtro_estado_viaje.addItems(["(Todos)", "Programado", "En Abordaje", "En Curso", "Retrasado", "Reprogramado", "Completado", "Cancelado"])
         self.combo_filtro_estado_viaje.currentIndexChanged.connect(self.refresh_viajes)
         bar_v.addWidget(self.combo_filtro_estado_viaje, stretch=2)
 
@@ -724,7 +826,7 @@ class M2RoutesInterface(QWidget):
         self.btn_reprogramar_viaje.clicked.connect(self.handle_reprogramar_viaje)
         bar_v.addWidget(self.btn_reprogramar_viaje)
 
-        self.btn_eliminar_viaje = PushButton("Eliminar Viaje", tab_widget, FIF.DELETE)
+        self.btn_eliminar_viaje = PushButton("Dar de Baja (Soft-Delete)", tab_widget, FIF.DELETE)
         self.btn_eliminar_viaje.clicked.connect(self.handle_eliminar_viaje)
         bar_v.addWidget(self.btn_eliminar_viaje)
 
@@ -736,9 +838,7 @@ class M2RoutesInterface(QWidget):
         self.table_viajes.setHorizontalHeaderLabels([
             "Numero Viaje", "Ruta", "Linea", "Fecha", "Prog. Salida", "Prog. Llegada", "Tren Asignado", "Maquinista", "Estado", "Pasajeros Estimados"
         ])
-        hv = self.table_viajes.horizontalHeader()
-        if hv is not None:
-            hv.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_viajes, min_col_width=75)
         self.table_viajes.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_viajes.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_viajes)
@@ -778,9 +878,7 @@ class M2RoutesInterface(QWidget):
         self.table_arribos.setHorizontalHeaderLabels([
             "Numero Viaje", "Ruta", "Linea", "Destino Final", "Arribo Estimado", "Tren", "Estado"
         ])
-        ha = self.table_arribos.horizontalHeader()
-        if ha is not None:
-            ha.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_arribos, min_col_width=75)
         self.table_arribos.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_arribos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         arribos_layout.addWidget(self.table_arribos)
@@ -807,9 +905,7 @@ class M2RoutesInterface(QWidget):
         self.table_afectaciones.setHorizontalHeaderLabels([
             "Codigo Ruta", "Linea", "Incidente", "Severidad", "Elemento Afectado", "Tipo Afectacion", "Inicio Incidente"
         ])
-        hf = self.table_afectaciones.horizontalHeader()
-        if hf is not None:
-            hf.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_afectaciones, min_col_width=75)
         self.table_afectaciones.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_afectaciones.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         afec_layout.addWidget(self.table_afectaciones)
@@ -872,24 +968,31 @@ class M2RoutesInterface(QWidget):
             row = self.table_rutas.rowCount()
             self.table_rutas.insertRow(row)
 
-            items = [
-                str(r.get("CODIGO", "")),
-                f"Linea {r.get('CODIGO_LINEA', '')}",
-                str(r.get("TIPO_SERVICIO", "")),
-                str(r.get("SENTIDO", "")),
-                str(r.get("ORIGEN", "")),
-                str(r.get("DESTINO", "")),
-                f"{_safe_float(r.get('DISTANCIA_TOTAL_KM', 0.0)):.1f} km",
-                f"{_safe_int(r.get('DURACION_ESTIMADA_MIN', 0))} min",
-                str(r.get("ESTADO", ""))
-            ]
-            for col, txt in enumerate(items):
-                self.table_rutas.setItem(row, col, QTableWidgetItem(txt))
+            self.table_rutas.setItem(row, 0, QTableWidgetItem(str(r.get("CODIGO", ""))))
+
+            linea_cod = str(r.get("CODIGO_LINEA", ""))
+            linea_col = str(r.get("COLOR_LINEA", "#0039A6"))
+            chip = LineColorChip(linea_cod, linea_col, f"Línea {linea_cod}", self.table_rutas)
+            self.table_rutas.setCellWidget(row, 1, chip)
+
+            srv = str(r.get("TIPO_SERVICIO", "Local"))
+            self.table_rutas.setCellWidget(row, 2, StatusBadge(srv, self.table_rutas))
+
+            self.table_rutas.setItem(row, 3, QTableWidgetItem(str(r.get("SENTIDO", ""))))
+            self.table_rutas.setItem(row, 4, QTableWidgetItem(str(r.get("ORIGEN", ""))))
+            self.table_rutas.setItem(row, 5, QTableWidgetItem(str(r.get("DESTINO", ""))))
+            self.table_rutas.setItem(row, 6, QTableWidgetItem(f"{_safe_float(r.get('DISTANCIA_TOTAL_KM', 0.0)):.1f} km"))
+            self.table_rutas.setItem(row, 7, QTableWidgetItem(f"{_safe_int(r.get('DURACION_ESTIMADA_MIN', 0))} min"))
+
+            st = str(r.get("ESTADO", "Activa"))
+            self.table_rutas.setCellWidget(row, 8, StatusBadge(st, self.table_rutas))
 
             # Guardar objeto completo en la primera columna
             first_item = self.table_rutas.item(row, 0)
             if first_item is not None:
                 first_item.setData(Qt.ItemDataRole.UserRole, r)
+
+        auto_fit_table_columns(self.table_rutas)
 
         if self.table_rutas.rowCount() > 0:
             self.table_rutas.selectRow(0)
@@ -936,6 +1039,8 @@ class M2RoutesInterface(QWidget):
             first_item = self.table_paradas.item(row, 0)
             if first_item is not None:
                 first_item.setData(Qt.ItemDataRole.UserRole, p)
+
+        auto_fit_table_columns(self.table_paradas)
 
     def handle_nueva_ruta(self):
         dlg = RutaDialog(self.window())
@@ -1108,6 +1213,8 @@ class M2RoutesInterface(QWidget):
             if first_item is not None:
                 first_item.setData(Qt.ItemDataRole.UserRole, h)
 
+        auto_fit_table_columns(self.table_horarios)
+
     def handle_nuevo_horario(self):
         ruta_id = self.combo_horario_ruta.currentData()
         if not ruta_id:
@@ -1181,24 +1288,30 @@ class M2RoutesInterface(QWidget):
             pasajeros_val = v.get("CANTIDAD_ESTIMADA_PASAJEROS")
             pasajeros_str = str(_safe_int(pasajeros_val)) if pasajeros_val is not None and str(pasajeros_val).strip() != "" and str(pasajeros_val) != "-" else "-"
 
-            items = [
-                str(v.get("NUMERO_VIAJE", "")),
-                str(v.get("CODIGO_RUTA", "")),
-                f"Linea {v.get('CODIGO_LINEA', '')}",
-                str(v.get("FECHA", "")),
-                str(v.get("HORA_PROG_SALIDA", "")),
-                str(v.get("HORA_PROG_LLEGADA", "")),
-                f"{v.get('CODIGO_TREN', '')} ({v.get('MODELO_TREN', '')})",
-                str(v.get("CONDUCTOR", "")),
-                str(v.get("ESTADO", "")),
-                pasajeros_str
-            ]
-            for col, txt in enumerate(items):
-                self.table_viajes.setItem(row, col, QTableWidgetItem(txt))
+            self.table_viajes.setItem(row, 0, QTableWidgetItem(str(v.get("NUMERO_VIAJE", ""))))
+            self.table_viajes.setItem(row, 1, QTableWidgetItem(str(v.get("CODIGO_RUTA", ""))))
+
+            linea_cod = str(v.get("CODIGO_LINEA", ""))
+            linea_col = str(v.get("COLOR_LINEA", "#0039A6"))
+            chip = LineColorChip(linea_cod, linea_col, f"Línea {linea_cod}", self.table_viajes)
+            self.table_viajes.setCellWidget(row, 2, chip)
+
+            self.table_viajes.setItem(row, 3, QTableWidgetItem(str(v.get("FECHA", ""))))
+            self.table_viajes.setItem(row, 4, QTableWidgetItem(str(v.get("HORA_PROG_SALIDA", ""))))
+            self.table_viajes.setItem(row, 5, QTableWidgetItem(str(v.get("HORA_PROG_LLEGADA", ""))))
+            self.table_viajes.setItem(row, 6, QTableWidgetItem(f"{v.get('CODIGO_TREN', '')} ({v.get('MODELO_TREN', '')})"))
+            self.table_viajes.setItem(row, 7, QTableWidgetItem(str(v.get("CONDUCTOR", ""))))
+
+            st_viaje = str(v.get("ESTADO", "Programado"))
+            self.table_viajes.setCellWidget(row, 8, StatusBadge(st_viaje, self.table_viajes))
+
+            self.table_viajes.setItem(row, 9, QTableWidgetItem(pasajeros_str))
 
             first_item = self.table_viajes.item(row, 0)
             if first_item is not None:
                 first_item.setData(Qt.ItemDataRole.UserRole, v)
+
+        auto_fit_table_columns(self.table_viajes)
 
     def handle_programar_viaje(self):
         dlg = ProgramarViajeDialog(self.window(), ruta_preseleccionada_id=self.selected_route_id)
@@ -1223,28 +1336,52 @@ class M2RoutesInterface(QWidget):
     def handle_cancelar_viaje(self):
         selected_rows = self.table_viajes.selectedItems()
         if not selected_rows:
-            InfoBar.warning("Atencion", "Selecciona un viaje para cancelarlo.", parent=self, position=InfoBarPosition.TOP_RIGHT)
+            InfoBar.warning("Sin Selección", "Selecciona un viaje para cancelarlo.", parent=self, position=InfoBarPosition.TOP_RIGHT)
             return
-        item = selected_rows[0]
-        if item is None:
+        row = selected_rows[0].row()
+        item0 = self.table_viajes.item(row, 0)
+        if item0 is None:
             return
-        v = item.data(Qt.ItemDataRole.UserRole)
-        res = m2_routes_service.cancelar_viaje(_safe_int(v.get("ID_VIAJE", 0)))
+        v = item0.data(Qt.ItemDataRole.UserRole)
+        if not v:
+            return
+        vid = _safe_int(v.get("ID_VIAJE", 0))
+
+        res = m2_routes_service.cancelar_viaje(vid)
         if res.get("success"):
             InfoBar.success("Viaje Cancelado", res.get("mensaje", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+
+            if self.combo_filtro_estado_viaje.currentText() not in ("(Todos)", "Cancelado"):
+                self.combo_filtro_estado_viaje.blockSignals(True)
+                self.combo_filtro_estado_viaje.setCurrentText("(Todos)")
+                self.combo_filtro_estado_viaje.blockSignals(False)
+
             self.refresh_viajes()
+
+            for r in range(self.table_viajes.rowCount()):
+                it = self.table_viajes.item(r, 0)
+                if it is not None:
+                    it_data = it.data(Qt.ItemDataRole.UserRole)
+                    if it_data and _safe_int(it_data.get("ID_VIAJE", 0)) == vid:
+                        self.table_viajes.selectRow(r)
+                        self.table_viajes.scrollToItem(it)
+                        break
+            vp = self.table_viajes.viewport()
+            if vp is not None:
+                vp.update()
         else:
             InfoBar.error("Error", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
     def handle_reprogramar_viaje(self):
         selected_rows = self.table_viajes.selectedItems()
         if not selected_rows:
-            InfoBar.warning("Atencion", "Selecciona un viaje para reprogramarlo o modificarlo.", parent=self, position=InfoBarPosition.TOP_RIGHT)
+            InfoBar.warning("Sin Selección", "Selecciona un viaje en la tabla para reprogramarlo o modificarlo.", parent=self, position=InfoBarPosition.TOP_RIGHT)
             return
-        item = selected_rows[0]
-        if item is None:
+        row = selected_rows[0].row()
+        item0 = self.table_viajes.item(row, 0)
+        if item0 is None:
             return
-        v = item.data(Qt.ItemDataRole.UserRole)
+        v = item0.data(Qt.ItemDataRole.UserRole)
         if not v:
             return
         vid = _safe_int(v.get("ID_VIAJE", 0))
@@ -1255,38 +1392,94 @@ class M2RoutesInterface(QWidget):
             datos = dlg.get_data()
             res = m2_routes_service.modificar_viaje(vid, datos)
             if res.get("success"):
-                InfoBar.success("Viaje Modificado", res.get("mensaje", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+                InfoBar.success("Viaje Actualizado", res.get("mensaje", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+
+                # Ajustar filtros si la nueva fecha o estado quedarían ocultos por los filtros actuales
+                nueva_fecha = datos.get("fecha", "")
+                curr_fecha = self.txt_filtro_fecha.text().strip()
+                if curr_fecha and curr_fecha != nueva_fecha:
+                    self.txt_filtro_fecha.blockSignals(True)
+                    self.txt_filtro_fecha.setText(nueva_fecha)
+                    self.txt_filtro_fecha.blockSignals(False)
+
+                nuevo_estado = datos.get("estado", "")
+                curr_estado = self.combo_filtro_estado_viaje.currentText()
+                if curr_estado != "(Todos)" and curr_estado != nuevo_estado:
+                    self.combo_filtro_estado_viaje.blockSignals(True)
+                    self.combo_filtro_estado_viaje.setCurrentText("(Todos)")
+                    self.combo_filtro_estado_viaje.blockSignals(False)
+
+                # Refrescar tabla y re-seleccionar la fila modificada para actualización visual inmediata
                 self.refresh_viajes()
+
+                for r in range(self.table_viajes.rowCount()):
+                    it = self.table_viajes.item(r, 0)
+                    if it is not None:
+                        it_data = it.data(Qt.ItemDataRole.UserRole)
+                        if it_data and _safe_int(it_data.get("ID_VIAJE", 0)) == vid:
+                            self.table_viajes.selectRow(r)
+                            self.table_viajes.scrollToItem(it)
+                            break
+                vp = self.table_viajes.viewport()
+                if vp is not None:
+                    vp.update()
             else:
                 InfoBar.error("Error al Modificar Viaje", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
     def handle_eliminar_viaje(self):
         selected_rows = self.table_viajes.selectedItems()
         if not selected_rows:
-            InfoBar.warning("Atencion", "Selecciona un viaje para eliminarlo.", parent=self, position=InfoBarPosition.TOP_RIGHT)
+            InfoBar.warning("Sin Selección", "Selecciona un viaje en la tabla para dar de baja o cancelar.", parent=self, position=InfoBarPosition.TOP_RIGHT)
             return
-        item = selected_rows[0]
-        if item is None:
+        row = selected_rows[0].row()
+        item0 = self.table_viajes.item(row, 0)
+        if item0 is None:
             return
-        v = item.data(Qt.ItemDataRole.UserRole)
+        v = item0.data(Qt.ItemDataRole.UserRole)
         if not v:
             return
         vid = _safe_int(v.get("ID_VIAJE", 0))
         num_viaje = str(v.get("NUMERO_VIAJE", ""))
+        cod_ruta = str(v.get("CODIGO_RUTA", ""))
 
         parent_w = self.window() if self.window() is not None else self
         dlg = MessageBox(
-            "Confirmar Eliminacion de Viaje",
-            f"¿Deseas eliminar permanentemente el viaje {num_viaje} (ID #{vid})?",
+            "Baja Operativa de Viaje (Soft-Delete)",
+            f"¿Deseas cancelar el viaje {num_viaje} (ID #{vid}) de la Ruta {cod_ruta}?\n\n"
+            "Por principios de inmutabilidad y auditoría de la red MTA NYCT, "
+            "los registros de tránsito no se eliminan físicamente de la base de datos. "
+            "El sistema aplicará una Baja Operativa Segura (Soft-Delete: estado 'Cancelado'), "
+            "preservando el historial de validaciones de pasajeros e incidencias.",
             parent_w
         )
+        dlg.yesButton.setText("Confirmar Cancelación (Soft-Delete)")
+        dlg.cancelButton.setText("Volver")
         if dlg.exec():
-            res = m2_routes_service.eliminar_viaje(vid)
+            res = m2_routes_service.eliminar_viaje(vid, forzar_soft_delete=True)
             if res.get("success"):
-                InfoBar.success("Viaje Eliminado", res.get("mensaje", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+                InfoBar.success("Viaje Cancelado", res.get("mensaje", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+
+                # Si el filtro ocultaría los cancelados, resetear a Todos
+                if self.combo_filtro_estado_viaje.currentText() not in ("(Todos)", "Cancelado"):
+                    self.combo_filtro_estado_viaje.blockSignals(True)
+                    self.combo_filtro_estado_viaje.setCurrentText("(Todos)")
+                    self.combo_filtro_estado_viaje.blockSignals(False)
+
                 self.refresh_viajes()
+
+                for r in range(self.table_viajes.rowCount()):
+                    it = self.table_viajes.item(r, 0)
+                    if it is not None:
+                        it_data = it.data(Qt.ItemDataRole.UserRole)
+                        if it_data and _safe_int(it_data.get("ID_VIAJE", 0)) == vid:
+                            self.table_viajes.selectRow(r)
+                            self.table_viajes.scrollToItem(it)
+                            break
+                vp = self.table_viajes.viewport()
+                if vp is not None:
+                    vp.update()
             else:
-                InfoBar.error("Error al Eliminar Viaje", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+                InfoBar.error("Error al Cancelar Viaje", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
     # --------------------------------------------------------------------------
     # ACCIONES PESTANA 4: PROXIMOS ARRIBOS E INCIDENTES
@@ -1315,6 +1508,7 @@ class M2RoutesInterface(QWidget):
             ]
             for col, txt in enumerate(items):
                 self.table_arribos.setItem(row, col, QTableWidgetItem(txt))
+        auto_fit_table_columns(self.table_arribos)
 
     def refresh_afectaciones(self):
         afectadas = m2_routes_service.get_rutas_afectadas_incidentes()
@@ -1339,6 +1533,8 @@ class M2RoutesInterface(QWidget):
             first_item = self.table_afectaciones.item(row, 0)
             if first_item is not None:
                 first_item.setData(Qt.ItemDataRole.UserRole, af)
+
+        auto_fit_table_columns(self.table_afectaciones)
 
     def handle_cancelar_viajes_afectados(self):
         selected_rows = self.table_afectaciones.selectedItems()

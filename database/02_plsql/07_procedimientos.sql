@@ -1,7 +1,7 @@
 -- ======================================================================
 -- SISTEMA DE GESTION DEL METRO DE NUEVA YORK [MTA NYCT]
 -- Capa de Programacion PL/SQL - 07_procedimientos.sql
--- 6 Procedimientos Almacenados Transaccionales Obligatorios (SPs)
+-- 8 Procedimientos Almacenados Transaccionales Obligatorios y de Cierre Formal (SPs)
 -- ======================================================================
 
 -- 1. SP: Programar un nuevo viaje validando disponibilidad de tren, division y conductor
@@ -112,93 +112,171 @@ CREATE OR REPLACE PROCEDURE SP_REGISTRAR_INGRESO (
     o_monto_cobrado        OUT NUMBER,
     o_nuevo_saldo          OUT NUMBER
 ) IS
-    v_id_tarjeta      NUMBER;
-    v_tarifa_id       NUMBER;
-    v_tarifa_monto    NUMBER(6,2);
-    v_saldo_actual    NUMBER(10,2);
-    v_estado_tarjeta  VARCHAR2(30);
-    v_vencimiento     DATE;
-    v_estacion_estado VARCHAR2(30);
-    v_tx_numero       VARCHAR2(50);
+    v_id_tarjeta         NUMBER;
+    v_tarifa_id          NUMBER;
+    v_tarifa_nombre      VARCHAR2(60);
+    v_tarifa_monto       NUMBER(6,2);
+    v_duracion_dias      NUMBER;
+    v_saldo_actual       NUMBER(10,2);
+    v_estado_tarjeta     VARCHAR2(30);
+    v_tipo_soporte       VARCHAR2(20);
+    v_vencimiento        DATE;
+    v_pase_inicio        DATE;
+    v_pase_fin           DATE;
+    v_estacion_estado    VARCHAR2(30);
+    v_tx_numero          VARCHAR2(50);
+    v_pago_registrado    NUMBER := 0;
+    v_es_pase_ilimitado  BOOLEAN := FALSE;
 BEGIN
     o_monto_cobrado := 0;
 
     -- A. Verificar estado de la estacion
     SELECT estado_operativo
     INTO v_estacion_estado
-    FROM ESTACION
+    FROM METRO_NY.ESTACION
     WHERE id_estacion = p_estacion_id;
 
     IF v_estacion_estado = 'Cerrada Temporalmente' THEN
-        o_resultado := 'RECHAZADO';
-        o_mensaje := 'Estacion temporalmente fuera de servicio. Ingreso no permitido.';
-        RETURN;
+        RAISE_APPLICATION_ERROR(-20058, 'Estacion temporalmente fuera de servicio. Ingreso no permitido.');
     END IF;
 
-    -- B. Verificar tarjeta
-    SELECT t.id_tarjeta, t.tarifa_id, t.saldo_disponible, t.estado, t.fecha_vencimiento, tar.monto
-    INTO v_id_tarjeta, v_tarifa_id, v_saldo_actual, v_estado_tarjeta, v_vencimiento, v_tarifa_monto
-    FROM TARJETA t
-    JOIN TARIFA tar ON t.tarifa_id = tar.id_tarifa
+    -- B. Verificar tarjeta y tarifa asociada
+    SELECT t.id_tarjeta, t.tarifa_id, tar.nombre, tar.monto, tar.duracion_beneficio_dias,
+           t.saldo_disponible, t.estado, t.fecha_vencimiento,
+           t.pase_fecha_inicio, t.pase_fecha_fin, NVL(t.tipo_soporte, 'Tarjeta')
+    INTO v_id_tarjeta, v_tarifa_id, v_tarifa_nombre, v_tarifa_monto, v_duracion_dias,
+         v_saldo_actual, v_estado_tarjeta, v_vencimiento,
+         v_pase_inicio, v_pase_fin, v_tipo_soporte
+    FROM METRO_NY.TARJETA t
+    JOIN METRO_NY.TARIFA tar ON t.tarifa_id = tar.id_tarifa
     WHERE t.numero_tarjeta = p_numero_tarjeta;
 
-    -- Validar si esta bloqueada o vencida
-    IF v_estado_tarjeta IN ('Bloqueada', 'Cancelada', 'Reportada Perdida') THEN
-        o_resultado := 'RECHAZADO';
-        o_mensaje := 'Tarjeta inhabilitada (Estado: ' || v_estado_tarjeta || ').';
-        o_nuevo_saldo := v_saldo_actual;
-        RETURN;
+    -- Validar si la tarjeta o boleto esta inhabilitado
+    IF v_estado_tarjeta != 'Activa' THEN
+        IF v_tipo_soporte = 'Boleto' THEN
+            RAISE_APPLICATION_ERROR(-20055, 'Boleto inhabilitado (Estado: ' || v_estado_tarjeta || '). Los boletos de uso unico admiten solo un viaje.');
+        ELSE
+            RAISE_APPLICATION_ERROR(-20055, 'Tarjeta inhabilitada (Estado: ' || v_estado_tarjeta || ').');
+        END IF;
     END IF;
 
-    IF v_vencimiento < TRUNC(SYSDATE) THEN
-        o_resultado := 'RECHAZADO';
-        o_mensaje := 'Tarjeta vencida con fecha ' || TO_CHAR(v_vencimiento, 'YYYY-MM-DD') || '.';
-        o_nuevo_saldo := v_saldo_actual;
-        RETURN;
+    -- Validar vencimiento fisico
+    IF v_vencimiento IS NOT NULL AND v_vencimiento < TRUNC(SYSDATE) THEN
+        RAISE_APPLICATION_ERROR(-20057, 'Soporte de viaje vencido con fecha ' || TO_CHAR(v_vencimiento, 'YYYY-MM-DD') || '.');
     END IF;
 
-    -- C. Validar saldo
-    IF v_saldo_actual < v_tarifa_monto THEN
-        o_resultado := 'SALDO_INSUFICIENTE';
-        o_mensaje := 'Saldo insuficiente ($' || TO_CHAR(v_saldo_actual, '990.00') || '). Tarifa requerida: $' || TO_CHAR(v_tarifa_monto, '990.00') || '.';
-        o_nuevo_saldo := v_saldo_actual;
-        RETURN;
+    -- C. Determinar si es un pase periodico ilimitado (Semanal / Mensual)
+    IF v_duracion_dias IS NOT NULL AND v_duracion_dias > 0 THEN
+        v_es_pase_ilimitado := TRUE;
     END IF;
 
-    -- D. Descontar saldo
-    o_nuevo_saldo := v_saldo_actual - v_tarifa_monto;
-    o_monto_cobrado := v_tarifa_monto;
+    IF v_es_pase_ilimitado THEN
+        -- 1. Validar si el pase esta vigente en la fecha del torniquete
+        IF v_pase_fin IS NULL OR TRUNC(SYSDATE) > v_pase_fin THEN
+            RAISE_APPLICATION_ERROR(
+                -20051, 
+                'Acceso denegado: El ' || v_tarifa_nombre || ' se encuentra vencido (Vencio: ' || 
+                NVL(TO_CHAR(v_pase_fin, 'YYYY-MM-DD'), 'No activado') || '). Requiere renovacion.'
+            );
+        END IF;
 
-    UPDATE TARJETA
-    SET saldo_disponible = o_nuevo_saldo
-    WHERE id_tarjeta = v_id_tarjeta;
+        IF v_pase_inicio IS NOT NULL AND TRUNC(SYSDATE) < v_pase_inicio THEN
+            RAISE_APPLICATION_ERROR(
+                -20051, 
+                'Acceso denegado: El ' || v_tarifa_nombre || ' aun no entra en vigencia (Inicia: ' || 
+                TO_CHAR(v_pase_inicio, 'YYYY-MM-DD') || ').'
+            );
+        END IF;
 
-    -- E. Registrar paso en VIAJE_PASAJERO
+        -- 2. Validar que el pago del pase haya sido registrado
+        SELECT COUNT(*)
+        INTO v_pago_registrado
+        FROM METRO_NY.RECARGA
+        WHERE tarjeta_id = v_id_tarjeta
+          AND monto >= v_tarifa_monto;
+
+        IF v_pago_registrado = 0 THEN
+            RAISE_APPLICATION_ERROR(
+                -20051,
+                'Acceso denegado: No se encontro registro de pago para el ' || v_tarifa_nombre || 
+                ' (Monto requerido: $' || LTRIM(TO_CHAR(v_tarifa_monto, '990.00')) || ').'
+            );
+        END IF;
+
+        -- 3. Para pase ilimitado pagado y vigente: NO SE REALIZA COBRO ($0.00)
+        o_monto_cobrado := 0.00;
+        o_nuevo_saldo := v_saldo_actual;
+
+    ELSIF v_tipo_soporte = 'Boleto' THEN
+        -- D. Boleto de uso unico: Debe cubrir la tarifa del viaje
+        IF v_saldo_actual < v_tarifa_monto THEN
+            RAISE_APPLICATION_ERROR(
+                -20051,
+                'Boleto sin saldo ($' || LTRIM(TO_CHAR(v_saldo_actual, '990.00')) || '). Tarifa requerida: $' ||
+                LTRIM(TO_CHAR(v_tarifa_monto, '990.00')) || '.'
+            );
+        END IF;
+
+        o_nuevo_saldo := 0.00;
+        o_monto_cobrado := v_tarifa_monto;
+    ELSE
+        -- E. Tarifa por viaje convencional en tarjeta recargable
+        IF v_saldo_actual < v_tarifa_monto THEN
+            RAISE_APPLICATION_ERROR(
+                -20051, 
+                'Saldo insuficiente ($' || LTRIM(TO_CHAR(v_saldo_actual, '990.00')) || '). Tarifa requerida: $' || 
+                LTRIM(TO_CHAR(v_tarifa_monto, '990.00')) || '.'
+            );
+        END IF;
+
+        o_nuevo_saldo := v_saldo_actual - v_tarifa_monto;
+        o_monto_cobrado := v_tarifa_monto;
+    END IF;
+
+    -- F. Registrar paso en VIAJE_PASAJERO (auditoria obligatoria mientras tarjeta/boleto sigue activa)
     v_tx_numero := 'TX-' || TO_CHAR(SYSDATE, 'YYYYMMDD') || '-' || LPAD(SEQ_VIAJE_PASAJERO.NEXTVAL, 8, '0');
 
-    INSERT INTO VIAJE_PASAJERO (
+    INSERT INTO METRO_NY.VIAJE_PASAJERO (
         id_viaje_pasajero, numero_transaccion, tarjeta_id,
         estacion_ingreso_id, fecha_hora_ingreso, tarifa_id,
         monto_cobrado, viaje_programado_id, estado_transaccion
     ) VALUES (
         SEQ_VIAJE_PASAJERO.CURRVAL, v_tx_numero, v_id_tarjeta,
         p_estacion_id, SYSTIMESTAMP, v_tarifa_id,
-        v_tarifa_monto, p_viaje_programado_id, 'Cerrada'
+        o_monto_cobrado, p_viaje_programado_id, 'Cerrada'
     );
+
+    -- G. Actualizar saldo y estado segun el soporte (Boleto queda consumido e inhabilitado)
+    IF v_tipo_soporte = 'Boleto' THEN
+        UPDATE METRO_NY.TARJETA
+        SET saldo_disponible = 0.00,
+            estado = 'Usado'
+        WHERE id_tarjeta = v_id_tarjeta;
+    ELSIF NOT v_es_pase_ilimitado AND v_tarifa_monto > 0 THEN
+        UPDATE METRO_NY.TARJETA
+        SET saldo_disponible = o_nuevo_saldo
+        WHERE id_tarjeta = v_id_tarjeta;
+    END IF;
 
     COMMIT;
     o_resultado := 'AUTORIZADO';
-    o_mensaje := 'Paso autorizado. Cobro: $' || TO_CHAR(v_tarifa_monto, '990.00') || ' | Saldo restante: $' || TO_CHAR(o_nuevo_saldo, '990.00');
+    IF v_es_pase_ilimitado THEN
+        o_mensaje := 'Paso autorizado con ' || v_tarifa_nombre || ' (Vigente hasta ' || 
+                     TO_CHAR(v_pase_fin, 'YYYY-MM-DD') || '). Cobro: $0.00 | Saldo restante: $' || 
+                     LTRIM(TO_CHAR(o_nuevo_saldo, '990.00'));
+    ELSIF v_tipo_soporte = 'Boleto' THEN
+        o_mensaje := 'Paso autorizado con Boleto de Uso Unico. Boleto marcado como Usado. Cobro: $' || 
+                     LTRIM(TO_CHAR(o_monto_cobrado, '990.00')) || ' | Saldo restante: $0.00';
+    ELSE
+        o_mensaje := 'Paso autorizado. Cobro: $' || LTRIM(TO_CHAR(o_monto_cobrado, '990.00')) || 
+                     ' | Saldo restante: $' || LTRIM(TO_CHAR(o_nuevo_saldo, '990.00'));
+    END IF;
 EXCEPTION
     WHEN NO_DATA_FOUND THEN
-        o_resultado := 'RECHAZADO';
-        o_mensaje := 'Numero de tarjeta no registrado en el sistema.';
-        o_nuevo_saldo := 0;
+        RAISE_APPLICATION_ERROR(-20050, 'Numero de tarjeta o boleto no registrado en el sistema.');
     WHEN OTHERS THEN
         ROLLBACK;
-        o_resultado := 'ERROR';
-        o_mensaje := 'Error interno al procesar ingreso: ' || SQLERRM;
-        o_nuevo_saldo := 0;
+        RAISE;
 END SP_REGISTRAR_INGRESO;
 /
 
@@ -214,15 +292,20 @@ CREATE OR REPLACE PROCEDURE SP_RECARGAR_TARJETA (
     v_id_tarjeta     NUMBER;
     v_saldo_ant      NUMBER(10,2);
     v_estado_tarjeta VARCHAR2(30);
+    v_tipo_soporte   VARCHAR2(20);
 BEGIN
     IF p_monto <= 0 THEN
         RAISE_APPLICATION_ERROR(-20007, 'El monto de recarga debe ser estrictamente positivo.');
     END IF;
 
-    SELECT id_tarjeta, saldo_disponible, estado
-    INTO v_id_tarjeta, v_saldo_ant, v_estado_tarjeta
+    SELECT id_tarjeta, saldo_disponible, estado, NVL(tipo_soporte, 'Tarjeta')
+    INTO v_id_tarjeta, v_saldo_ant, v_estado_tarjeta, v_tipo_soporte
     FROM TARJETA
     WHERE numero_tarjeta = p_numero_tarjeta;
+
+    IF v_tipo_soporte = 'Boleto' THEN
+        RAISE_APPLICATION_ERROR(-20009, 'Operacion no permitida: Los boletos de uso unico no son recargables.');
+    END IF;
 
     IF v_estado_tarjeta = 'Cancelada' THEN
         RAISE_APPLICATION_ERROR(-20008, 'No es posible recargar una tarjeta cancelada.');
@@ -248,7 +331,7 @@ BEGIN
     COMMIT;
 EXCEPTION
     WHEN NO_DATA_FOUND THEN
-        RAISE_APPLICATION_ERROR(-20009, 'La tarjeta indicada no existe.');
+        RAISE_APPLICATION_ERROR(-20006, 'Numero de tarjeta no registrado en el sistema.');
     WHEN OTHERS THEN
         ROLLBACK;
         RAISE;
@@ -265,10 +348,36 @@ CREATE OR REPLACE PROCEDURE SP_CREAR_ORDEN_MANTENIMIENTO (
     o_numero_orden        OUT VARCHAR2,
     o_id_orden            OUT NUMBER
 ) IS
-    v_tipo_ref   VARCHAR2(30);
-    v_ref_id     NUMBER;
-    v_seq_val    NUMBER;
+    v_tipo_ref    VARCHAR2(30);
+    v_ref_id      NUMBER;
+    v_seq_val     NUMBER;
+    v_eq_estado   VARCHAR2(30);
+    v_tren_estado VARCHAR2(30);
 BEGIN
+    IF p_descripcion IS NULL OR LENGTH(TRIM(p_descripcion)) < 3 THEN
+        RAISE_APPLICATION_ERROR(-20075, 'La descripción de los trabajos técnicos a realizar es obligatoria.');
+    END IF;
+
+    -- Validar estado del equipo y tren
+    SELECT tipo_referencia, referencia_id, estado
+    INTO v_tipo_ref, v_ref_id, v_eq_estado
+    FROM EQUIPO
+    WHERE id_equipo = p_equipo_id;
+
+    IF v_eq_estado IN ('Retirado', 'Dado de Baja') THEN
+        RAISE_APPLICATION_ERROR(-20078, 'No se puede programar mantenimiento para un activo retirado o dado de baja.');
+    END IF;
+
+    IF v_tipo_ref = 'TREN' AND v_ref_id IS NOT NULL THEN
+        SELECT estado_operativo INTO v_tren_estado
+        FROM TREN
+        WHERE id_tren = v_ref_id;
+
+        IF v_tren_estado IN ('Retirado', 'Dado de Baja') THEN
+            RAISE_APPLICATION_ERROR(-20077, 'No se puede asignar mantenimiento a un tren que ha sido dado de baja o retirado del servicio activo.');
+        END IF;
+    END IF;
+
     v_seq_val := SEQ_ORDEN_MANTENIMIENTO.NEXTVAL;
     o_id_orden := v_seq_val;
     o_numero_orden := 'ORD-' || TO_CHAR(SYSDATE, 'YYYY') || '-' || LPAD(v_seq_val, 4, '0');
@@ -280,7 +389,7 @@ BEGIN
         fecha_inicio, prioridad, costo, estado
     ) VALUES (
         o_id_orden, o_numero_orden, p_equipo_id, p_tipo_mantenimiento,
-        p_descripcion, SYSDATE, SYSDATE, SYSDATE, p_prioridad, 0, 'En Ejecución'
+        TRIM(p_descripcion), SYSDATE, SYSDATE, SYSDATE, p_prioridad, 0, 'En Ejecución'
     );
 
     -- Si se especifico un tecnico lider, registrarlo
@@ -288,16 +397,11 @@ BEGIN
         INSERT INTO ORDEN_TECNICO (
             id_orden_tecnico, orden_id, empleado_id, rol_en_orden
         ) VALUES (
-            SEQ_ORDEN_TECNICO.NEXTVAL, o_id_orden, p_tecnico_id, 'Lider de Reparacion'
+            SEQ_ORDEN_TECNICO.NEXTVAL, o_id_orden, p_tecnico_id, 'Líder de Reparación'
         );
     END IF;
 
     -- Si el equipo afectado es un tren, cambiar estado en TREN
-    SELECT tipo_referencia, referencia_id
-    INTO v_tipo_ref, v_ref_id
-    FROM EQUIPO
-    WHERE id_equipo = p_equipo_id;
-
     IF v_tipo_ref = 'TREN' AND v_ref_id IS NOT NULL THEN
         UPDATE TREN
         SET estado_operativo = 'En Mantenimiento'
@@ -312,13 +416,79 @@ BEGIN
 
     COMMIT;
 EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20080, 'El equipo especificado no existe en el sistema.');
     WHEN OTHERS THEN
         ROLLBACK;
         RAISE;
 END SP_CREAR_ORDEN_MANTENIMIENTO;
 /
 
--- 5. SP: Registrar un incidente operativo y asociar elemento afectado
+-- 5. SP: Cierre formal y reincorporacion de activo tras mantenimiento
+CREATE OR REPLACE PROCEDURE SP_CERRAR_ORDEN_MANTENIMIENTO (
+    p_id_orden               IN NUMBER,
+    p_costo_final            IN NUMBER DEFAULT NULL,
+    p_fecha_finalizacion     IN DATE DEFAULT NULL,
+    p_dias_proxima_revision  IN NUMBER DEFAULT 90,
+    o_mensaje                OUT VARCHAR2
+) IS
+    v_equipo_id    NUMBER;
+    v_tipo_ref     VARCHAR2(30);
+    v_ref_id       NUMBER;
+    v_costo_total  NUMBER;
+    v_f_fin        DATE;
+BEGIN
+    SELECT om.equipo_id, eq.tipo_referencia, eq.referencia_id
+    INTO v_equipo_id, v_tipo_ref, v_ref_id
+    FROM ORDEN_MANTENIMIENTO om
+    JOIN EQUIPO eq ON om.equipo_id = eq.id_equipo
+    WHERE om.id_orden = p_id_orden;
+
+    v_f_fin := NVL(p_fecha_finalizacion, SYSDATE);
+
+    IF p_costo_final IS NOT NULL THEN
+        v_costo_total := p_costo_final;
+    ELSE
+        v_costo_total := FN_COSTO_ORDEN_MANTENIMIENTO(p_id_orden);
+    END IF;
+
+    -- Actualizar orden a Completada
+    UPDATE ORDEN_MANTENIMIENTO
+    SET estado = 'Completada',
+        fecha_finalizacion = v_f_fin,
+        costo = v_costo_total
+    WHERE id_orden = p_id_orden;
+
+    -- Restaurar estado del equipo y actualizar inspecciones
+    UPDATE EQUIPO
+    SET estado = 'Disponible',
+        fecha_ultima_revision = SYSDATE,
+        fecha_proxima_revision = SYSDATE + NVL(p_dias_proxima_revision, 90)
+    WHERE id_equipo = v_equipo_id;
+
+    -- Si es tren, restaurar TREN
+    IF v_tipo_ref = 'TREN' AND v_ref_id IS NOT NULL THEN
+        UPDATE TREN
+        SET estado_operativo = 'Disponible',
+            fecha_ultima_inspeccion = SYSDATE,
+            fecha_proxima_inspeccion = SYSDATE + NVL(p_dias_proxima_revision, 90)
+        WHERE id_tren = v_ref_id;
+    END IF;
+
+    COMMIT;
+    o_mensaje := 'Orden de mantenimiento finalizada exitosamente. Activo reincorporado al servicio activo.';
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20081, 'Orden de mantenimiento no encontrada.');
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE;
+END SP_CERRAR_ORDEN_MANTENIMIENTO;
+/
+
+-- 6. SP: Registrar un incidente operativo y asociar elemento afectado
 CREATE OR REPLACE PROCEDURE SP_REGISTRAR_INCIDENTE (
     p_tipo               IN VARCHAR2,
     p_descripcion        IN VARCHAR2,
@@ -379,7 +549,45 @@ EXCEPTION
 END SP_REGISTRAR_INCIDENTE;
 /
 
--- 6. SP: Cancelar automaticamente viajes afectados por cierre de estacion o ruta
+-- 7. SP: Procedimiento Canonico de Cierre Tecnico de Incidente
+CREATE OR REPLACE PROCEDURE SP_CERRAR_INCIDENTE (
+    p_id_incidente        IN NUMBER,
+    p_causa_identificada  IN VARCHAR2,
+    p_acciones_realizadas IN VARCHAR2,
+    p_pasajeros_afectados IN NUMBER DEFAULT 0,
+    p_fecha_fin           IN TIMESTAMP DEFAULT NULL,
+    o_mensaje             OUT VARCHAR2
+) IS
+    v_estado VARCHAR2(15);
+BEGIN
+    -- Seleccionar estado (si no existe, lanza ORA-01403 No Data Found)
+    SELECT estado INTO v_estado
+    FROM INCIDENTE
+    WHERE id_incidente = p_id_incidente;
+
+    IF p_causa_identificada IS NULL OR LENGTH(TRIM(p_causa_identificada)) < 3 THEN
+        RAISE_APPLICATION_ERROR(-20084, 'La causa identificada es obligatoria para el cierre formal del incidente.');
+    END IF;
+
+    IF p_acciones_realizadas IS NULL OR LENGTH(TRIM(p_acciones_realizadas)) < 3 THEN
+        RAISE_APPLICATION_ERROR(-20085, 'Las acciones realizadas son obligatorias para el cierre formal del incidente.');
+    END IF;
+
+    UPDATE INCIDENTE
+    SET estado = 'Cerrado',
+        causa_identificada = TRIM(p_causa_identificada),
+        acciones_realizadas = TRIM(p_acciones_realizadas),
+        resolucion = TRIM(p_acciones_realizadas),
+        pasajeros_afectados_estimado = NVL(p_pasajeros_afectados, 0),
+        fecha_hora_fin = NVL(p_fecha_fin, SYSTIMESTAMP)
+    WHERE id_incidente = p_id_incidente;
+
+    o_mensaje := 'Incidente ' || p_id_incidente || ' cerrado formalmente.';
+    COMMIT;
+END SP_CERRAR_INCIDENTE;
+/
+
+-- 8. SP: Cancelar automaticamente viajes afectados por cierre de estacion o ruta
 CREATE OR REPLACE PROCEDURE SP_CANCELAR_VIAJES_AFECTADOS (
     p_incidente_id      IN NUMBER,
     o_viajes_cancelados OUT NUMBER

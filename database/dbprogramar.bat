@@ -38,7 +38,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [3/4] Compilando 6 Procedimientos almacenados transaccionales (SPs)...
+echo [3/4] Compilando 8 Procedimientos almacenados transaccionales (SPs)...
 sqlplus -S METRO_NY/MetroPass123@localhost:1521/%PDB_NAME% @02_plsql\07_procedimientos.sql
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Fallo en la compilacion de procedimientos.
@@ -47,7 +47,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [4/4] Compilando 8 Triggers de integridad y auditoria...
+echo [4/4] Compilando 34 Triggers de integridad, auditoria y seguridad...
 sqlplus -S METRO_NY/MetroPass123@localhost:1521/%PDB_NAME% @02_plsql\08_triggers.sql
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Fallo en la compilacion de triggers.
@@ -68,11 +68,11 @@ echo EXIT;
 
 echo.
 echo ======================================================================
-echo    ¡LOGICA PL/SQL COMPILADA EXITOSAMENTE EN %PDB_NAME%!
+echo    LOGICA PL/SQL COMPILADA EXITOSAMENTE EN %PDB_NAME%!
 echo    - 9 Vistas creadas / reemplazadas (VW_*)
 echo    - 9 Funciones de calculo compiladas (FN_*)
-echo    - 6 Procedimientos almacenados listos (SP_*)
-echo    - 8 Triggers activos en la base de datos (TRG_*)
+echo    - 8 Procedimientos almacenados listos (SP_*)
+echo    - 34 Triggers activos en la base de datos (TRG_*)
 echo.
 echo    Puedes ejecutar las pruebas en:
 echo    sqlplus METRO_NY/MetroPass123@localhost:1521/%PDB_NAME% @03_pruebas\prueba_15_consultas.sql

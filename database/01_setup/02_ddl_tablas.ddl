@@ -311,7 +311,7 @@ CREATE TABLE BITACORA
      id_bitacora    NUMBER (14)  NOT NULL , 
      fecha_hora     TIMESTAMP  NOT NULL , 
      tabla_afectada VARCHAR2 (30)  NOT NULL , 
-     operacion      VARCHAR2 (10) , 
+     operacion      VARCHAR2 (30) , 
      registro_id    NUMBER (14) , 
      usuario        VARCHAR2 (50) , 
      descripcion    VARCHAR2 (500) 
@@ -321,7 +321,7 @@ CREATE TABLE BITACORA
 
 ALTER TABLE BITACORA 
     ADD CONSTRAINT CK_BITACORA_OPERACION 
-    CHECK (operacion IN ('DELETE', 'INSERT', 'UPDATE')) 
+    CHECK (operacion IN ('DELETE', 'INSERT', 'UPDATE', 'ALERTA_ESCALABILIDAD', 'ALERTA')) 
 ;
 
 COMMENT ON TABLE BITACORA IS 'Registro de auditoría de cambios importantes (alimentada por triggers).'
@@ -358,6 +358,11 @@ CREATE TABLE CERTIFICACION
 ALTER TABLE CERTIFICACION 
     ADD CONSTRAINT CK_CERTIFICACION_ESTADO 
     CHECK (estado IN ('Revocada', 'Vencida', 'Vigente')) 
+;
+
+ALTER TABLE CERTIFICACION 
+    ADD CONSTRAINT CK_CERTIFICACION_FECHAS 
+    CHECK (fecha_vencimiento IS NULL OR fecha_emision IS NULL OR fecha_vencimiento >= fecha_emision) 
 ;
 
 COMMENT ON TABLE CERTIFICACION IS 'Certificación de un empleado (p.ej. para operar cierto modelo de tren).'
@@ -464,6 +469,11 @@ ALTER TABLE EMPLEADO
 ALTER TABLE EMPLEADO 
     ADD CONSTRAINT CK_EMPLEADO_ESTADO_LABORAL 
     CHECK (estado_laboral IN ('Activo', 'Permiso', 'Retirado', 'Suspendido', 'Vacaciones')) 
+;
+
+ALTER TABLE EMPLEADO 
+    ADD CONSTRAINT CK_EMPLEADO_SALARIO 
+    CHECK (salario IS NULL OR salario > 0) 
 ;
 
 COMMENT ON TABLE EMPLEADO IS 'Personal operativo del metro.'
@@ -592,7 +602,17 @@ ALTER TABLE ESTACION
 
 ALTER TABLE ESTACION 
     ADD CONSTRAINT CK_ESTACION_ESTADO_OPERATIVO 
-    CHECK (estado_operativo IN ('Cerrada', 'Cerrada Temporalmente', 'Operativa')) 
+    CHECK (estado_operativo IN ('Cerrada', 'Cerrada Temporalmente', 'Operativa', 'Inactiva')) 
+;
+
+ALTER TABLE ESTACION 
+    ADD CONSTRAINT CK_ESTACION_LATITUD 
+    CHECK (latitud BETWEEN -90 AND 90 AND latitud != 0) 
+;
+
+ALTER TABLE ESTACION 
+    ADD CONSTRAINT CK_ESTACION_LONGITUD 
+    CHECK (longitud BETWEEN -180 AND 180 AND longitud != 0) 
 ;
 
 ALTER TABLE ESTACION 
@@ -811,11 +831,12 @@ CREATE TABLE INCIDENTE
      descripcion                  VARCHAR2 (500) , 
      fecha_hora_inicio            TIMESTAMP  NOT NULL , 
      fecha_hora_fin               TIMESTAMP , 
-     nivel_severidad              VARCHAR2 (10) , 
+     nivel_severidad              VARCHAR2 (20) , 
      reportado_por_id             NUMBER (8) , 
      estado                       VARCHAR2 (15) , 
      causa_identificada           VARCHAR2 (300) , 
      acciones_realizadas          VARCHAR2 (500) , 
+     resolucion                   VARCHAR2 (500) , 
      pasajeros_afectados_estimado NUMBER (8) 
     ) 
     LOGGING 
@@ -828,17 +849,17 @@ ALTER TABLE INCIDENTE
 
 ALTER TABLE INCIDENTE 
     ADD CONSTRAINT CK_INCIDENTE_FECHA_HORA_FIN 
-    CHECK (fecha_hora_fin >= fecha_hora_inicio) 
+    CHECK (fecha_hora_fin IS NULL OR fecha_hora_fin >= fecha_hora_inicio) 
 ;
 
 ALTER TABLE INCIDENTE 
     ADD CONSTRAINT CK_INCIDENTE_NIVEL_SEVERIDAD 
-    CHECK (nivel_severidad IN ('Alto', 'Bajo', 'Crítico', 'Medio')) 
+    CHECK (nivel_severidad IN ('Alta', 'Media', 'Baja', 'Crítica', 'Critica', 'Alto', 'Medio', 'Bajo', 'Crítico', 'Critico')) 
 ;
 
 ALTER TABLE INCIDENTE 
     ADD CONSTRAINT CK_INCIDENTE_ESTADO 
-    CHECK (estado IN ('Abierto', 'Cerrado', 'En Atención')) 
+    CHECK (estado IN ('Abierto', 'En Atención', 'En Atencion', 'Cerrado')) 
 ;
 
 COMMENT ON TABLE INCIDENTE IS 'Incidente operativo ocurrido en la red.'
@@ -1102,7 +1123,22 @@ ALTER TABLE ORDEN_MANTENIMIENTO
 
 ALTER TABLE ORDEN_MANTENIMIENTO 
     ADD CONSTRAINT CK_ORDEN_MANTENIMIENTO_ESTADO 
-    CHECK (estado IN ('Cancelada', 'Completada', 'En Ejecución', 'Programada', 'Solicitada', 'Suspendida')) 
+    CHECK (estado IN ('Cancelada', 'Completada', 'Cerrada', 'En Ejecución', 'En Ejecucion', 'Programada', 'Solicitada', 'Suspendida')) 
+;
+
+ALTER TABLE ORDEN_MANTENIMIENTO 
+    ADD CONSTRAINT CK_ORDEN_MANT_COSTO 
+    CHECK (costo >= 0) 
+;
+
+ALTER TABLE ORDEN_MANTENIMIENTO 
+    ADD CONSTRAINT CK_ORDEN_MANT_FECHAS 
+    CHECK (fecha_finalizacion IS NULL OR fecha_inicio IS NULL OR fecha_finalizacion >= fecha_inicio) 
+;
+
+ALTER TABLE ORDEN_MANTENIMIENTO 
+    ADD CONSTRAINT CK_ORDEN_MANT_DESC_NOT_NULL 
+    CHECK (descripcion_trabajo IS NOT NULL AND LENGTH(TRIM(descripcion_trabajo)) >= 3) 
 ;
 
 COMMENT ON TABLE ORDEN_MANTENIMIENTO IS 'Orden de trabajo de mantenimiento sobre un equipo.'
@@ -1156,6 +1192,16 @@ COMMENT ON COLUMN ORDEN_REPUESTO.repuesto_id IS '-> REPUESTO. NOT NULL'
 ;
 
 COMMENT ON COLUMN ORDEN_REPUESTO.cantidad IS 'NOT NULL' 
+;
+
+ALTER TABLE ORDEN_REPUESTO 
+    ADD CONSTRAINT CK_ORDEN_REPUESTO_CANTIDAD 
+    CHECK (cantidad > 0) 
+;
+
+ALTER TABLE ORDEN_REPUESTO 
+    ADD CONSTRAINT CK_ORDEN_REPUESTO_COSTO 
+    CHECK (costo_total >= 0) 
 ;
 
 ALTER TABLE ORDEN_REPUESTO 
@@ -1296,6 +1342,11 @@ ALTER TABLE RECARGA
     CHECK (medio_pago IN ('App Móvil', 'Efectivo', 'Tarjeta Crédito', 'Tarjeta Débito', 'Transferencia')) 
 ;
 
+ALTER TABLE RECARGA 
+    ADD CONSTRAINT CK_RECARGA_MONTO 
+    CHECK (monto > 0) 
+;
+
 COMMENT ON TABLE RECARGA IS 'Recarga de saldo realizada sobre una tarjeta.'
 ;
 
@@ -1328,12 +1379,28 @@ ALTER TABLE RECARGA
 
 CREATE TABLE REPUESTO 
     ( 
-     id_repuesto    NUMBER (8)  NOT NULL , 
-     codigo         VARCHAR2 (20)  NOT NULL , 
-     nombre         VARCHAR2 (100)  NOT NULL , 
-     costo_unitario NUMBER (8,2) 
+     id_repuesto      NUMBER (8)  NOT NULL , 
+     codigo           VARCHAR2 (20)  NOT NULL , 
+     nombre           VARCHAR2 (100)  NOT NULL , 
+     costo_unitario   NUMBER (8,2) , 
+     stock_disponible NUMBER (6) DEFAULT 50 NOT NULL 
     ) 
     LOGGING 
+;
+
+ALTER TABLE REPUESTO 
+    ADD CONSTRAINT CK_REPUESTO_STOCK 
+    CHECK (stock_disponible >= 0) 
+;
+
+ALTER TABLE REPUESTO 
+    ADD CONSTRAINT CK_REPUESTO_CODIGO_FORMAT 
+    CHECK (REGEXP_LIKE(codigo, '^REP-[A-Z0-9]{2,8}(-[A-Z0-9]{1,4})?$')) 
+;
+
+ALTER TABLE REPUESTO 
+    ADD CONSTRAINT CK_REPUESTO_COSTO_UNIT 
+    CHECK (costo_unitario >= 0) 
 ;
 
 COMMENT ON TABLE REPUESTO IS 'Catálogo de repuestos utilizables en órdenes de mantenimiento.'
@@ -1490,6 +1557,11 @@ ALTER TABLE TARIFA
     CHECK (estado IN ('Suspendida', 'Vencida', 'Vigente')) 
 ;
 
+ALTER TABLE TARIFA 
+    ADD CONSTRAINT CHK_TARIFA_MONTO 
+    CHECK (monto >= 0) 
+;
+
 COMMENT ON TABLE TARIFA IS 'Tarifa vigente por tipo de pasajero/producto; se conserva historial.'
 ;
 
@@ -1526,7 +1598,11 @@ CREATE TABLE TARJETA
      fecha_vencimiento DATE , 
      saldo_disponible  NUMBER (8,2) , 
      tarifa_id         NUMBER (8) , 
-     estado            VARCHAR2 (20) 
+     estado            VARCHAR2 (20) , 
+     uid_nfc           VARCHAR2 (50) , 
+     tipo_soporte      VARCHAR2 (20) DEFAULT 'Tarjeta' NOT NULL , 
+     pase_fecha_inicio DATE , 
+     pase_fecha_fin    DATE 
     ) 
     LOGGING 
 ;
@@ -1538,7 +1614,12 @@ ALTER TABLE TARJETA
 
 ALTER TABLE TARJETA 
     ADD CONSTRAINT CK_TARJETA_ESTADO 
-    CHECK (estado IN ('Activa', 'Bloqueada', 'Cancelada', 'Reportada Perdida', 'Vencida')) 
+    CHECK (estado IN ('Activa', 'Bloqueada', 'Cancelada', 'Reportada Perdida', 'Vencida', 'Usado')) 
+;
+
+ALTER TABLE TARJETA 
+    ADD CONSTRAINT CK_TARJETA_TIPO_SOPORTE 
+    CHECK (tipo_soporte IN ('Tarjeta', 'Boleto')) 
 ;
 
 COMMENT ON TABLE TARJETA IS 'Tarjeta electrónica; puede ser nominal (pasajero_id) o anónima (NULL).'
@@ -1567,6 +1648,9 @@ ALTER TABLE TARJETA
 
 ALTER TABLE TARJETA 
     ADD CONSTRAINT UK_TARJETA_NUMERO_TARJETA UNIQUE ( numero_tarjeta ) ;
+
+ALTER TABLE TARJETA 
+    ADD CONSTRAINT UK_TARJETA_UID_NFC UNIQUE ( uid_nfc ) ;
 
 CREATE TABLE TRANSFERENCIA 
     ( 
@@ -1622,6 +1706,21 @@ CREATE TABLE TREN
 ALTER TABLE TREN 
     ADD CONSTRAINT CK_TREN_ESTADO_OPERATIVO 
     CHECK (estado_operativo IN ('Disponible', 'En Mantenimiento', 'En Operación', 'Fuera de Servicio', 'Retirado')) 
+;
+
+ALTER TABLE TREN 
+    ADD CONSTRAINT CK_TREN_CAPACIDAD 
+    CHECK (capacidad_total BETWEEN 0 AND 4500) 
+;
+
+ALTER TABLE TREN 
+    ADD CONSTRAINT CK_TREN_KILOMETRAJE 
+    CHECK (kilometraje_acumulado >= 0) 
+;
+
+ALTER TABLE TREN 
+    ADD CONSTRAINT CK_TREN_FECHAS_INSPEC 
+    CHECK (fecha_proxima_inspeccion IS NULL OR fecha_ultima_inspeccion IS NULL OR fecha_proxima_inspeccion >= fecha_ultima_inspeccion) 
 ;
 
 COMMENT ON TABLE TREN IS 'Unidad de tren que compone la flota.'
@@ -1773,6 +1872,16 @@ ALTER TABLE VAGON
     CHECK (accesibilidad IN ('N', 'S')) 
 ;
 
+ALTER TABLE VAGON 
+    ADD CONSTRAINT CK_VAGON_CAPACIDAD_SENT 
+    CHECK (capacidad_sentados BETWEEN 0 AND 200) 
+;
+
+ALTER TABLE VAGON 
+    ADD CONSTRAINT CK_VAGON_CAPACIDAD_PIE 
+    CHECK (capacidad_de_pie BETWEEN 0 AND 400) 
+;
+
 COMMENT ON TABLE VAGON IS 'Vagón individual; su pertenencia a un tren se conserva como historial en TREN_VAGON.'
 ;
 
@@ -1878,7 +1987,7 @@ ALTER TABLE VIAJE_PROGRAMADO
 
 ALTER TABLE VIAJE_PROGRAMADO 
     ADD CONSTRAINT CK_VIAJE_PROGRAMADO_ESTADO 
-    CHECK (estado IN ('Cancelado', 'Completado', 'En Abordaje', 'En Curso', 'Programado', 'Retrasado')) 
+    CHECK (estado IN ('Cancelado', 'Completado', 'En Abordaje', 'En Curso', 'Programado', 'Retrasado', 'Reprogramado')) 
 ;
 
 COMMENT ON TABLE VIAJE_PROGRAMADO IS 'Ejecución concrééeta de una ruta en una fecha y hora determinadas.'

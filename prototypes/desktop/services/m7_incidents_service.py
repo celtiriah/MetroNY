@@ -16,6 +16,24 @@ from services.actions_service import (
 )
 
 
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 # ==============================================================================
 # 1. CATALOGO Y GESTION DE INCIDENTES (INCIDENTE)
 # ==============================================================================
@@ -125,6 +143,81 @@ def get_incidente_by_id(id_incidente: int) -> Optional[Dict[str, Any]]:
     return data
 
 
+# ==============================================================================
+# VALIDACIONES DE NEGOCIO Y DOMINIO
+# ==============================================================================
+
+def _validar_datos_incidente(
+    tipo: str,
+    descripcion: str,
+    nivel_severidad: str,
+    reportado_por_id: int
+) -> Optional[str]:
+    """Valida los datos requeridos para registrar un incidente."""
+    tipos_validos = (
+        "Falla Mecánica", "Falla Eléctrica", "Falla de Señalización",
+        "Emergencia Médica", "Accidente", "Problema de Seguridad",
+        "Objeto en la Vía", "Inundación", "Incendio", "Congestión",
+        "Mantenimiento no Programado"
+    )
+    if not tipo or tipo not in tipos_validos:
+        return "Debe seleccionar un tipo válido de eventualidad."
+    if not descripcion or len(descripcion.strip()) < 3:
+        return "La descripción del hecho debe contener al menos 3 caracteres."
+    if len(descripcion.strip()) > 500:
+        return "La descripción del hecho no puede exceder 500 caracteres."
+    severidades_validas = ("Bajo", "Medio", "Alto", "Crítico", "Baja", "Media", "Alta", "Critico", "Critica")
+    if not nivel_severidad or nivel_severidad not in severidades_validas:
+        return "El nivel de severidad especificado no es válido."
+    if not reportado_por_id or reportado_por_id <= 0:
+        return "Debe seleccionar el empleado o personal que reporta el incidente."
+    return None
+
+
+def _validar_cierre_incidente(
+    causa_identificada: str,
+    acciones_realizadas: str,
+    pasajeros_afectados: Optional[int] = None
+) -> Optional[str]:
+    """Valida los campos obligatorios para el cierre formal de un incidente."""
+    if not causa_identificada or len(causa_identificada.strip()) < 3:
+        return "La causa identificada es obligatoria (al menos 3 caracteres)."
+    if len(causa_identificada.strip()) > 300:
+        return "La causa identificada no puede exceder 300 caracteres."
+    if not acciones_realizadas or len(acciones_realizadas.strip()) < 3:
+        return "Las acciones realizadas / resolución son obligatorias (al menos 3 caracteres)."
+    if len(acciones_realizadas.strip()) > 500:
+        return "Las acciones realizadas no pueden exceder 500 caracteres."
+    if pasajeros_afectados is not None and pasajeros_afectados < 0:
+        return "El número de pasajeros afectados no puede ser negativo."
+    return None
+
+
+def verificar_dependencias_incidente(id_incidente: int) -> Dict[str, Any]:
+    """Verifica si el incidente tiene elementos asociados o auditorías registradas."""
+    sql = """
+        SELECT 
+            (SELECT COUNT(*) FROM INCIDENTE_ELEMENTO_AFECTADO WHERE incidente_id = :id_inc) AS total_elementos,
+            (SELECT COUNT(*) FROM BITACORA WHERE tabla_afectada = 'INCIDENTE' AND registro_id = :id_inc) AS total_bitacora,
+            (SELECT estado FROM INCIDENTE WHERE id_incidente = :id_inc) AS estado
+        FROM DUAL
+    """
+    rows = execute_query(sql, {"id_inc": int(id_incidente)})["rows"]
+    if rows:
+        r = rows[0]
+        elem = _safe_int(r.get("TOTAL_ELEMENTOS"))
+        bit = _safe_int(r.get("TOTAL_BITACORA"))
+        est = str(r.get("ESTADO") or "")
+        return {
+            "total_elementos": elem,
+            "total_bitacora": bit,
+            "estado": est,
+            "tiene_dependencias": elem > 0 or bit > 0,
+            "puede_eliminar": est != "Cerrado"
+        }
+    return {"total_elementos": 0, "total_bitacora": 0, "estado": "", "tiene_dependencias": False, "puede_eliminar": False}
+
+
 def registrar_incidente(
     tipo: str,
     descripcion: str,
@@ -138,6 +231,10 @@ def registrar_incidente(
     Registra un incidente invocando el procedimiento canonico SP_REGISTRAR_INCIDENTE.
     El trigger TRG_INCIDENTE_AUDITORIA inserta automaticamente la operacion en BITACORA.
     """
+    err = _validar_datos_incidente(tipo, descripcion, nivel_severidad, reportado_por_id)
+    if err:
+        return {"success": False, "numero_incidente": "", "id_incidente": 0, "error": err}
+
     return sp_registrar_incidente(
         tipo=tipo,
         descripcion=descripcion.strip(),
@@ -170,37 +267,46 @@ def cerrar_incidente(
     id_incidente: int,
     causa_identificada: str,
     acciones_realizadas: str,
-    pasajeros_afectados: int,
+    pasajeros_afectados: int = 0,
     fecha_fin: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Cierra formalmente un incidente operativo registrando la causa raiz,
-    acciones correctivas, estimacion de pasajeros y fecha de finalizacion.
+    acciones correctivas, estimacion de pasajeros y fecha de finalizacion
+    mediante el procedimiento canonico SP_CERRAR_INCIDENTE.
     El trigger TRG_INCIDENTE_AUDITORIA registra la actualizacion en BITACORA.
     """
+    err = _validar_cierre_incidente(causa_identificada, acciones_realizadas, pasajeros_afectados)
+    if err:
+        return {"success": False, "error": err}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        sql = """
-            UPDATE INCIDENTE
-            SET estado = 'Cerrado',
-                causa_identificada = :causa,
-                acciones_realizadas = :acciones,
-                pasajeros_afectados_estimado = :pasajeros,
-                fecha_hora_fin = NVL(TO_TIMESTAMP(:f_fin, 'YYYY-MM-DD HH24:MI'), SYSTIMESTAMP)
-            WHERE id_incidente = :id_inc
-        """
-        cursor.execute(sql, {
-            "causa": causa_identificada.strip(),
-            "acciones": acciones_realizadas.strip(),
-            "pasajeros": int(pasajeros_afectados),
-            "f_fin": fecha_fin if fecha_fin else None,
-            "id_inc": int(id_incidente)
-        })
+        v_msg = cursor.var(oracledb.STRING)
+        f_date = None
+        if fecha_fin and fecha_fin.strip():
+            try:
+                f_date = datetime.strptime(fecha_fin.strip(), "%Y-%m-%d %H:%M")
+            except ValueError:
+                try:
+                    f_date = datetime.strptime(fecha_fin.strip(), "%Y-%m-%d")
+                except ValueError:
+                    f_date = None
+
+        cursor.callproc("SP_CERRAR_INCIDENTE", [
+            int(id_incidente),
+            causa_identificada.strip(),
+            acciones_realizadas.strip(),
+            int(pasajeros_afectados),
+            f_date,
+            v_msg
+        ])
         conn.commit()
+        msg_val = v_msg.getvalue()
         return {
             "success": True,
-            "mensaje": f"Incidente {id_incidente} cerrado exitosamente. Auditoría registrada en BITACORA."
+            "mensaje": str(msg_val or f"Incidente {id_incidente} cerrado exitosamente. Auditoría registrada en BITACORA.")
         }
     except Exception as e:
         conn.rollback()
@@ -465,12 +571,12 @@ def get_kpis_incidentes() -> Dict[str, Any]:
     if rows:
         r = rows[0]
         return {
-            "activos": int(r.get("INCIDENTES_ACTIVOS") or 0),
-            "en_atencion": int(r.get("EN_ATENCION") or 0),
-            "abiertos": int(r.get("ABIERTOS") or 0),
-            "criticos_altos": int(r.get("CRITICOS_ALTOS") or 0),
-            "pasajeros_afectados": int(r.get("PASAJEROS_AFECTADOS_ACTIVOS") or 0),
-            "viajes_cancelados": int(r.get("VIAJES_CANCELADOS_TOTAL") or 0)
+            "activos": _safe_int(r.get("INCIDENTES_ACTIVOS")),
+            "en_atencion": _safe_int(r.get("EN_ATENCION")),
+            "abiertos": _safe_int(r.get("ABIERTOS")),
+            "criticos_altos": _safe_int(r.get("CRITICOS_ALTOS")),
+            "pasajeros_afectados": _safe_int(r.get("PASAJEROS_AFECTADOS_ACTIVOS")),
+            "viajes_cancelados": _safe_int(r.get("VIAJES_CANCELADOS_TOTAL"))
         }
     return {"activos": 0, "en_atencion": 0, "abiertos": 0, "criticos_altos": 0, "pasajeros_afectados": 0, "viajes_cancelados": 0}
 

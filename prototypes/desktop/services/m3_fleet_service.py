@@ -25,6 +25,24 @@ def _query_rows(sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[
     return res.get("rows", [])
 
 
+def _safe_int(val: Any, default: int = 0) -> int:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None or val == "-" or val == "":
+            return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 # ==============================================================================
 # 1. CATALOGOS AUXILIARES: MODELOS Y DEPOSITOS
 # ==============================================================================
@@ -124,20 +142,65 @@ def get_tren_by_id(id_tren: int) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
+def _validar_datos_tren(datos: Dict[str, Any], id_tren_existente: Optional[int] = None) -> Optional[str]:
+    """Valida reglas de dominio técnico y restricciones relacionales para un tren."""
+    codigo = str(datos.get("codigo_interno") or "").strip().upper()
+    if not codigo:
+        return "El código interno del tren es obligatorio."
+    if len(codigo) > 15:
+        return "El código interno no puede exceder 15 caracteres."
+
+    modelo_id = datos.get("modelo_id")
+    if modelo_id is None:
+        return "Debe seleccionar un modelo de tren válido."
+    try:
+        if int(modelo_id) <= 0:
+            return "Debe seleccionar un modelo de tren válido."
+    except (ValueError, TypeError):
+        return "El identificador del modelo de tren es inválido."
+
+    anio = datos.get("anio_fabricacion")
+    if anio is not None and str(anio).strip() != "":
+        try:
+            anio_int = int(anio)
+            max_anio = datetime.now().year + 1
+            if anio_int < 1950 or anio_int > max_anio:
+                return f"El año de fabricación debe estar comprendido entre 1950 y {max_anio}."
+        except (ValueError, TypeError):
+            return "El año de fabricación debe ser un número entero válido."
+
+    km = datos.get("kilometraje_acumulado")
+    if km is not None and str(km).strip() != "":
+        try:
+            km_flt = float(km)
+            if km_flt < 0:
+                return "El kilometraje acumulado no puede ser un valor negativo."
+        except (ValueError, TypeError):
+            return "El kilometraje debe ser un valor numérico válido."
+
+    f_ult = datos.get("fecha_ultima_inspeccion")
+    f_prox = datos.get("fecha_proxima_inspeccion")
+    if f_ult and f_prox and str(f_ult).strip() and str(f_prox).strip():
+        try:
+            d_ult = datetime.strptime(str(f_ult).strip()[:10], "%Y-%m-%d").date()
+            d_prox = datetime.strptime(str(f_prox).strip()[:10], "%Y-%m-%d").date()
+            if d_prox < d_ult:
+                return "La fecha de próxima inspección técnica no puede ser anterior a la fecha de última inspección."
+        except ValueError:
+            return "El formato de las fechas de inspección debe ser estrictamente YYYY-MM-DD."
+
+    return None
+
+
 def crear_tren(datos: Dict[str, Any]) -> Dict[str, Any]:
     """
     Inserta un nuevo tren en la tabla TREN usando SEQ_TREN.NEXTVAL.
-    Parámetros requeridos en datos:
-      - codigo_interno (str)
-      - modelo_id (int)
-    Opcionales:
-      - anio_fabricacion (int)
-      - deposito_id (int)
-      - kilometraje_acumulado (float)
-      - estado_operativo (str, default 'Disponible')
-      - fecha_ultima_inspeccion (str YYYY-MM-DD o None)
-      - fecha_proxima_inspeccion (str YYYY-MM-DD o None)
+    Valida preventivamente formato, modelo, año, kilometraje y fechas de inspección.
     """
+    err_val = _validar_datos_tren(datos)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -164,7 +227,7 @@ def crear_tren(datos: Dict[str, Any]) -> Dict[str, Any]:
             "modelo_id": int(datos["modelo_id"]),
             "anio_fabricacion": datos.get("anio_fabricacion"),
             "estado_operativo": datos.get("estado_operativo", "Disponible"),
-            "kilometraje_acumulado": float(datos.get("kilometraje_acumulado") or 0.0),
+            "kilometraje_acumulado": _safe_float(datos.get("kilometraje_acumulado")),
             "deposito_id": datos.get("deposito_id"),
             "fecha_ult": datos.get("fecha_ultima_inspeccion") or None,
             "fecha_prox": datos.get("fecha_proxima_inspeccion") or None,
@@ -210,10 +273,27 @@ def crear_tren(datos: Dict[str, Any]) -> Dict[str, Any]:
 def modificar_tren(id_tren: int, datos: Dict[str, Any]) -> Dict[str, Any]:
     """
     Actualiza datos técnicos y administrativos de un tren existente.
+    Verifica integridad de odómetro impidiendo reducción fraudulenta.
     """
+    err_val = _validar_datos_tren(datos, id_tren_existente=id_tren)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        # Validar protección de odómetro a nivel servicio
+        cursor.execute("SELECT kilometraje_acumulado FROM TREN WHERE id_tren = :id_tren", {"id_tren": id_tren})
+        row_km = cursor.fetchone()
+        if row_km and row_km[0] is not None:
+            km_actual = _safe_float(row_km[0])
+            km_nuevo = _safe_float(datos.get("kilometraje_acumulado"))
+            if km_nuevo < km_actual:
+                return {
+                    "success": False,
+                    "error": f"Intento de manipulación de odómetro: El kilometraje acumulado no puede reducirse (Valor actual: {km_actual:.1f} km, Nuevo: {km_nuevo:.1f} km)."
+                }
+
         sql = """
             UPDATE TREN
             SET codigo_interno = :codigo_interno,
@@ -231,7 +311,7 @@ def modificar_tren(id_tren: int, datos: Dict[str, Any]) -> Dict[str, Any]:
             "modelo_id": int(datos["modelo_id"]),
             "anio_fabricacion": datos.get("anio_fabricacion"),
             "deposito_id": datos.get("deposito_id"),
-            "kilometraje_acumulado": float(datos.get("kilometraje_acumulado") or 0.0),
+            "kilometraje_acumulado": _safe_float(datos.get("kilometraje_acumulado")),
             "fecha_ult": datos.get("fecha_ultima_inspeccion") or None,
             "fecha_prox": datos.get("fecha_proxima_inspeccion") or None,
         }
@@ -299,40 +379,141 @@ def cambiar_estado_tren(id_tren: int, nuevo_estado: str) -> Dict[str, Any]:
         conn.close()
 
 
-def eliminar_tren(id_tren: int) -> Dict[str, Any]:
+def verificar_dependencias_tren(id_tren: int) -> Dict[str, Any]:
     """
-    Elimina un tren del sistema si no tiene viajes programados ni vagones activos.
+    Audita exhaustivamente las relaciones operativas de un tren antes de permitir
+    su eliminación física o baja lógica en el sistema:
+    - Viajes asignados (históricos o futuros en VIAJE_PROGRAMADO)
+    - Vagones actualmente acoplados (TREN_VAGON con fecha_fin IS NULL)
+    - Vagones históricamente asignados (TREN_VAGON con fecha_fin IS NOT NULL)
+    - Órdenes de mantenimiento registradas (ORDEN_MANTENIMIENTO vía EQUIPO)
+    - Incidentes reportados (INCIDENTE_ELEMENTO_AFECTADO)
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # 1. Validar que no tenga viajes programados
+        cursor.execute("SELECT codigo_interno, estado_operativo FROM TREN WHERE id_tren = :id_tren", {"id_tren": id_tren})
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "error": "El tren especificado no existe en la base de datos."}
+        cod_interno, est_operativo = str(row[0]), str(row[1])
+
+        # 1. Viajes
         cursor.execute("SELECT COUNT(*) FROM VIAJE_PROGRAMADO WHERE tren_id = :id_tren", {"id_tren": id_tren})
-        viajes_cnt = cursor.fetchone()[0]
-        if viajes_cnt > 0:
-            return {
-                "success": False,
-                "error": f"No se puede eliminar el tren: tiene {viajes_cnt} viaje(s) asignado(s) en el sistema."
-            }
+        viajes_cnt = int(cursor.fetchone()[0])
 
-        # 2. Validar que no tenga vagones acoplados actualmente
+        # 2. Vagones acoplados activos
         cursor.execute("SELECT COUNT(*) FROM TREN_VAGON WHERE tren_id = :id_tren AND fecha_fin IS NULL", {"id_tren": id_tren})
-        vagones_cnt = cursor.fetchone()[0]
-        if vagones_cnt > 0:
-            return {
-                "success": False,
-                "error": f"No se puede eliminar el tren: tiene {vagones_cnt} vagón(es) acoplado(s). Desacóplelos primero."
-            }
+        vagones_activos_cnt = int(cursor.fetchone()[0])
 
-        # 3. Eliminar histórico de acoplamiento de este tren si existiera
-        cursor.execute("DELETE FROM TREN_VAGON WHERE tren_id = :id_tren", {"id_tren": id_tren})
+        # 3. Vagones históricos
+        cursor.execute("SELECT COUNT(*) FROM TREN_VAGON WHERE tren_id = :id_tren AND fecha_fin IS NOT NULL", {"id_tren": id_tren})
+        vagones_hist_cnt = int(cursor.fetchone()[0])
 
-        # 4. Eliminar equipo asociado
+        # 4. Órdenes de taller
+        cursor.execute("""
+            SELECT COUNT(*) FROM ORDEN_MANTENIMIENTO om
+            JOIN EQUIPO eq ON om.equipo_id = eq.id_equipo
+            WHERE eq.tipo_referencia = 'TREN' AND eq.referencia_id = :id_tren
+        """, {"id_tren": id_tren})
+        ordenes_cnt = int(cursor.fetchone()[0])
+
+        # 5. Incidentes
+        cursor.execute("SELECT COUNT(*) FROM INCIDENTE_ELEMENTO_AFECTADO WHERE tren_id = :id_tren", {"id_tren": id_tren})
+        incidentes_cnt = int(cursor.fetchone()[0])
+
+        resumen_partes = []
+        if viajes_cnt > 0:
+            resumen_partes.append(f"{viajes_cnt} viaje(s) programado(s)")
+        if vagones_activos_cnt > 0:
+            resumen_partes.append(f"{vagones_activos_cnt} vagón(es) acoplado(s) actualmente")
+        if vagones_hist_cnt > 0:
+            resumen_partes.append(f"{vagones_hist_cnt} registro(s) de formación previa")
+        if ordenes_cnt > 0:
+            resumen_partes.append(f"{ordenes_cnt} orden(es) de mantenimiento")
+        if incidentes_cnt > 0:
+            resumen_partes.append(f"{incidentes_cnt} reporte(s) de incidente")
+
+        resumen_texto = ", ".join(resumen_partes) if resumen_partes else "Sin dependencias operativas registradas"
+        tiene_dependencias = (viajes_cnt > 0 or ordenes_cnt > 0 or vagones_hist_cnt > 0 or incidentes_cnt > 0)
+        puede_eliminar_fisico = (not tiene_dependencias and vagones_activos_cnt == 0)
+
+        return {
+            "success": True,
+            "id_tren": id_tren,
+            "codigo_interno": cod_interno,
+            "estado_operativo": est_operativo,
+            "viajes_cnt": viajes_cnt,
+            "vagones_activos_cnt": vagones_activos_cnt,
+            "vagones_hist_cnt": vagones_hist_cnt,
+            "ordenes_cnt": ordenes_cnt,
+            "incidentes_cnt": incidentes_cnt,
+            "tiene_dependencias": tiene_dependencias,
+            "puede_eliminar_fisico": puede_eliminar_fisico,
+            "resumen": resumen_texto
+        }
+    except Exception as exc:
+        return {"success": False, "error": parse_oracle_error(exc)}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def dar_de_baja_tren(id_tren: int) -> Dict[str, Any]:
+    """
+    Aplica baja lógica (Soft-Delete) a un tren, marcando su estado como 'Retirado'
+    e impidiendo su eliminación física para salvaguardar la integridad referencial
+    del histórico de viajes, composiciones y órdenes de mantenimiento.
+    """
+    dep = verificar_dependencias_tren(id_tren)
+    if not dep.get("success"):
+        return dep
+
+    if dep.get("vagones_activos_cnt", 0) > 0:
+        return {
+            "success": False,
+            "error": f"No se puede retirar el tren {dep.get('codigo_interno')}: tiene {dep.get('vagones_activos_cnt')} vagón(es) acoplado(s) activamente. Desacóplelos primero en la pestaña de Composición."
+        }
+
+    return cambiar_estado_tren(id_tren, "Retirado")
+
+
+def eliminar_tren(id_tren: int) -> Dict[str, Any]:
+    """
+    Elimina un tren del sistema si no posee historial operativo alguno.
+    Si posee historial de viajes, acoplamientos u órdenes de mantenimiento,
+    la eliminación física es rechazada por regla de integridad DBA,
+    instruyendo al operador a utilizar la baja lógica (Retirado).
+    """
+    dep = verificar_dependencias_tren(id_tren)
+    if not dep.get("success"):
+        return dep
+
+    if dep.get("vagones_activos_cnt", 0) > 0:
+        return {
+            "success": False,
+            "error": f"No se puede eliminar el tren: tiene {dep.get('vagones_activos_cnt')} vagón(es) acoplado(s) actualmente. Desacóplelos primero."
+        }
+
+    if dep.get("tiene_dependencias", False):
+        return {
+            "success": False,
+            "requiere_baja_logica": True,
+            "resumen": dep.get("resumen"),
+            "error": (
+                f"No se permite la eliminación física del tren {dep.get('codigo_interno')} "
+                f"debido a que posee historial operativo registrado ({dep.get('resumen')}). "
+                f"Por integridad relacional, se debe aplicar baja lógica (estado Retirado)."
+            )
+        }
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Eliminar equipo asociado
         cursor.execute("DELETE FROM EQUIPO WHERE tipo_referencia = 'TREN' AND referencia_id = :id_tren", {"id_tren": id_tren})
-
-        # 5. Eliminar tren
+        # Eliminar tren
         cursor.execute("DELETE FROM TREN WHERE id_tren = :id_tren", {"id_tren": id_tren})
-
         conn.commit()
         return {"success": True}
     except Exception as exc:
@@ -438,10 +619,54 @@ def get_vagones_disponibles_combo() -> List[Dict[str, Any]]:
     return _query_rows(sql)
 
 
+def _validar_datos_vagon(datos: Dict[str, Any]) -> Optional[str]:
+    """Valida reglas de dominio y límites de capacidad física para un vagón."""
+    serie = str(datos.get("numero_serie") or "").strip().upper()
+    if not serie:
+        return "El número de serie del vagón es obligatorio."
+    if len(serie) > 20:
+        return "El número de serie no puede exceder 20 caracteres."
+
+    sentados = datos.get("capacidad_sentados")
+    if sentados is not None and str(sentados).strip() != "":
+        try:
+            s_int = int(sentados)
+            if s_int < 0 or s_int > 200:
+                return "La capacidad de pasajeros sentados debe estar comprendida entre 0 y 200."
+        except (ValueError, TypeError):
+            return "La capacidad de sentados debe ser un número entero válido."
+
+    pie = datos.get("capacidad_de_pie")
+    if pie is not None and str(pie).strip() != "":
+        try:
+            p_int = int(pie)
+            if p_int < 0 or p_int > 400:
+                return "La capacidad de pasajeros de pie debe estar comprendida entre 0 y 400."
+        except (ValueError, TypeError):
+            return "La capacidad de pie debe ser un número entero válido."
+
+    anio = datos.get("anio_fabricacion")
+    if anio is not None and str(anio).strip() != "":
+        try:
+            anio_int = int(anio)
+            max_anio = datetime.now().year + 1
+            if anio_int < 1950 or anio_int > max_anio:
+                return f"El año de fabricación del vagón debe estar comprendido entre 1950 y {max_anio}."
+        except (ValueError, TypeError):
+            return "El año de fabricación debe ser un número entero válido."
+
+    return None
+
+
 def crear_vagon(datos: Dict[str, Any]) -> Dict[str, Any]:
     """
     Registra un nuevo vagón en la tabla VAGON usando SEQ_VAGON.NEXTVAL.
+    Valida preventivamente formato de serie, capacidades y año de fabricación.
     """
+    err_val = _validar_datos_vagon(datos)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -464,8 +689,8 @@ def crear_vagon(datos: Dict[str, Any]) -> Dict[str, Any]:
             "id_vagon": new_id,
             "numero_serie": datos["numero_serie"].strip().upper(),
             "tipo_vagon": datos.get("tipo_vagon", "Pasajero Regular"),
-            "cap_sentados": int(datos.get("capacidad_sentados") or 40),
-            "cap_pie": int(datos.get("capacidad_de_pie") or 160),
+            "cap_sentados": _safe_int(datos.get("capacidad_sentados"), 40),
+            "cap_pie": _safe_int(datos.get("capacidad_de_pie"), 160),
             "anio_fab": datos.get("anio_fabricacion"),
             "estado": datos.get("estado", "Disponible"),
             "accesibilidad": datos.get("accesibilidad", "S")
@@ -485,6 +710,10 @@ def modificar_vagon(id_vagon: int, datos: Dict[str, Any]) -> Dict[str, Any]:
     """
     Actualiza datos de un vagón y recomputa la capacidad del tren si está acoplado.
     """
+    err_val = _validar_datos_vagon(datos)
+    if err_val:
+        return {"success": False, "error": err_val}
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -502,8 +731,8 @@ def modificar_vagon(id_vagon: int, datos: Dict[str, Any]) -> Dict[str, Any]:
             "id_vagon": id_vagon,
             "numero_serie": datos["numero_serie"].strip().upper(),
             "tipo_vagon": datos.get("tipo_vagon", "Pasajero Regular"),
-            "cap_sentados": int(datos.get("capacidad_sentados") or 40),
-            "cap_pie": int(datos.get("capacidad_de_pie") or 160),
+            "cap_sentados": _safe_int(datos.get("capacidad_sentados"), 40),
+            "cap_pie": _safe_int(datos.get("capacidad_de_pie"), 160),
             "anio_fab": datos.get("anio_fabricacion"),
             "accesibilidad": datos.get("accesibilidad", "S")
         }
@@ -571,21 +800,103 @@ def cambiar_estado_vagon(id_vagon: int, nuevo_estado: str) -> Dict[str, Any]:
         conn.close()
 
 
-def eliminar_vagon(id_vagon: int) -> Dict[str, Any]:
+def verificar_dependencias_vagon(id_vagon: int) -> Dict[str, Any]:
     """
-    Elimina un vagón si no está acoplado ni tiene historial de asignación (Regla 25).
+    Audita acoplamientos activos e históricos de un vagón en la flota.
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT COUNT(*) FROM TREN_VAGON WHERE vagon_id = :id_vagon", {"id_vagon": id_vagon})
-        hist_count = cursor.fetchone()[0]
-        if hist_count > 0:
-            return {
-                "success": False,
-                "error": f"No se puede eliminar el vagón: tiene {hist_count} registro(s) de acoplamiento en el historial (Regla de negocio 25)."
-            }
+        cursor.execute("SELECT numero_serie, estado FROM VAGON WHERE id_vagon = :id_vagon", {"id_vagon": id_vagon})
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "error": "El vagón no existe en la base de datos."}
+        num_serie, est = str(row[0]), str(row[1])
 
+        # Acoplamiento activo
+        cursor.execute("""
+            SELECT t.codigo_interno
+            FROM TREN_VAGON tv
+            JOIN TREN t ON tv.tren_id = t.id_tren
+            WHERE tv.vagon_id = :id_vagon AND tv.fecha_fin IS NULL
+        """, {"id_vagon": id_vagon})
+        activo_row = cursor.fetchone()
+        tren_acoplado = str(activo_row[0]) if activo_row else None
+
+        # Historial de acoplamiento
+        cursor.execute("""
+            SELECT COUNT(*) FROM TREN_VAGON WHERE vagon_id = :id_vagon AND fecha_fin IS NOT NULL
+        """, {"id_vagon": id_vagon})
+        hist_count = int(cursor.fetchone()[0])
+
+        tiene_historial = hist_count > 0
+        esta_acoplado = tren_acoplado is not None
+
+        return {
+            "success": True,
+            "id_vagon": id_vagon,
+            "numero_serie": num_serie,
+            "estado": est,
+            "esta_acoplado": esta_acoplado,
+            "tren_acoplado": tren_acoplado,
+            "hist_count": hist_count,
+            "tiene_historial": tiene_historial,
+            "puede_eliminar_fisico": not esta_acoplado and not tiene_historial
+        }
+    except Exception as exc:
+        return {"success": False, "error": parse_oracle_error(exc)}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def dar_de_baja_vagon(id_vagon: int) -> Dict[str, Any]:
+    """
+    Aplica baja lógica (Soft-Delete) al vagón marcándolo como 'Fuera de Servicio',
+    preservando el historial de acoplamientos (Regla 25).
+    """
+    dep = verificar_dependencias_vagon(id_vagon)
+    if not dep.get("success"):
+        return dep
+
+    if dep.get("esta_acoplado"):
+        return {
+            "success": False,
+            "error": f"No se puede dar de baja el vagón {dep.get('numero_serie')}: está acoplado activamente al tren {dep.get('tren_acoplado')}. Desacóplelo primero."
+        }
+
+    return cambiar_estado_vagon(id_vagon, "Fuera de Servicio")
+
+
+def eliminar_vagon(id_vagon: int) -> Dict[str, Any]:
+    """
+    Elimina un vagón si no está acoplado ni posee historial de formaciones previas.
+    Si posee historial, instruye a aplicar la baja lógica (Fuera de Servicio - Regla 25).
+    """
+    dep = verificar_dependencias_vagon(id_vagon)
+    if not dep.get("success"):
+        return dep
+
+    if dep.get("esta_acoplado"):
+        return {
+            "success": False,
+            "error": f"No se puede eliminar el vagón: está acoplado activamente al tren {dep.get('tren_acoplado')}. Desacóplelo primero."
+        }
+
+    if dep.get("tiene_historial"):
+        return {
+            "success": False,
+            "requiere_baja_logica": True,
+            "error": (
+                f"No se permite la eliminación física del vagón {dep.get('numero_serie')} "
+                f"debido a que posee {dep.get('hist_count')} registro(s) en el historial de formaciones (Regla 25). "
+                f"Por integridad relacional, aplique la baja lógica (marcar como Fuera de Servicio)."
+            )
+        }
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
         cursor.execute("DELETE FROM VAGON WHERE id_vagon = :id_vagon", {"id_vagon": id_vagon})
         conn.commit()
         return {"success": True}
@@ -927,10 +1238,10 @@ def verificar_disponibilidad_tren(id_tren: int) -> Dict[str, Any]:
         return {"success": False, "error": "Tren no encontrado"}
 
     row = rows[0]
-    disponible_fn = int(row.get("DISPONIBLE_FN") or 0) == 1
-    inspeccion_vencida = int(row.get("INSPECCION_VENCIDA") or 0) == 1
-    ordenes_activas = int(row.get("ORDENES_MANTENIMIENTO_ACTIVAS") or 0)
-    viajes_curso = int(row.get("VIAJES_EN_CURSO") or 0)
+    disponible_fn = _safe_int(row.get("DISPONIBLE_FN")) == 1
+    inspeccion_vencida = _safe_int(row.get("INSPECCION_VENCIDA")) == 1
+    ordenes_activas = _safe_int(row.get("ORDENES_MANTENIMIENTO_ACTIVAS"))
+    viajes_curso = _safe_int(row.get("VIAJES_EN_CURSO"))
     estado_op = str(row.get("ESTADO_OPERATIVO", ""))
 
     motivos = []
@@ -950,7 +1261,7 @@ def verificar_disponibilidad_tren(id_tren: int) -> Dict[str, Any]:
         "id_tren": id_tren,
         "codigo_interno": row["CODIGO_INTERNO"],
         "estado_operativo": estado_op,
-        "capacidad_total": int(row.get("CAPACIDAD_TOTAL") or 0),
+        "capacidad_total": _safe_int(row.get("CAPACIDAD_TOTAL")),
         "fecha_proxima_inspeccion": row.get("FECHA_PROXIMA_INSPECCION", "-"),
         "dias_para_inspeccion": row.get("DIAS_PARA_INSPECCION"),
         "disponible_fn": disponible_fn,
@@ -989,14 +1300,14 @@ def get_kpis_flota() -> Dict[str, int]:
     if rows:
         r = rows[0]
         return {
-            "total_trenes": int(r.get("TOTAL_TRENES") or 0),
-            "disponibles": int(r.get("DISPONIBLES") or 0),
-            "en_operacion": int(r.get("EN_OPERACION") or 0),
-            "en_mantenimiento": int(r.get("EN_MANTENIMIENTO") or 0),
-            "inspecciones_vencidas": int(r.get("INSPECCIONES_VENCIDAS") or 0),
-            "total_vagones": int(r.get("TOTAL_VAGONES") or 0),
-            "vagones_en_uso": int(r.get("VAGONES_EN_USO") or 0),
-            "vagones_libres": int(r.get("VAGONES_LIBRES") or 0),
+            "total_trenes": _safe_int(r.get("TOTAL_TRENES")),
+            "disponibles": _safe_int(r.get("DISPONIBLES")),
+            "en_operacion": _safe_int(r.get("EN_OPERACION")),
+            "en_mantenimiento": _safe_int(r.get("EN_MANTENIMIENTO")),
+            "inspecciones_vencidas": _safe_int(r.get("INSPECCIONES_VENCIDAS")),
+            "total_vagones": _safe_int(r.get("TOTAL_VAGONES")),
+            "vagones_en_uso": _safe_int(r.get("VAGONES_EN_USO")),
+            "vagones_libres": _safe_int(r.get("VAGONES_LIBRES")),
         }
     return {
         "total_trenes": 0, "disponibles": 0, "en_operacion": 0,

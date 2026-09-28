@@ -2,6 +2,7 @@
 Background Worker Threads for Asynchronous Database Operations.
 Prevents GUI freezing during heavy database queries and network calls.
 """
+from typing import Any, Dict, Optional
 from PyQt5.QtCore import QThread, pyqtSignal
 from services.db import execute_query
 
@@ -13,10 +14,10 @@ class QueryWorker(QThread):
     data_loaded = pyqtSignal(list, list, str)   # columns, rows, pdb
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, sql: str, params: dict = None, parent=None):
+    def __init__(self, sql: str, params: Optional[Dict[str, Any]] = None, parent=None):
         super().__init__(parent)
         self.sql = sql
-        self.params = params or {}
+        self.params: Dict[str, Any] = params or {}
 
     def run(self):
         try:

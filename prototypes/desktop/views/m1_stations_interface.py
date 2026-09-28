@@ -14,18 +14,22 @@ Implementa:
 """
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QHeaderView,
-    QTableWidgetItem, QStackedWidget, QFrame
+    QTableWidgetItem, QStackedWidget, QFrame, QColorDialog
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor
 
 from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
-    SegmentedWidget, CheckBox, MessageBoxBase, FluentIcon as FIF
+    SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, FluentIcon as FIF
 )
 
 from services import m1_network_service as network_service
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 # ==============================================================================
@@ -116,7 +120,7 @@ class EstacionDialog(MessageBoxBase):
         # Estado Operativo
         form_layout.addWidget(CaptionLabel("Estado Operativo:", self), 8, 0)
         self.combo_estado = ComboBox(self)
-        estados = ["Operativa", "Cerrada", "Cerrada Temporalmente"]
+        estados = ["Operativa", "Cerrada", "Cerrada Temporalmente", "Inactiva"]
         self.combo_estado.addItems(estados)
         if self.is_edit and data.get("ESTADO_OPERATIVO") in estados:
             self.combo_estado.setCurrentText(str(data.get("ESTADO_OPERATIVO")))
@@ -142,10 +146,71 @@ class EstacionDialog(MessageBoxBase):
         chk_layout.addWidget(self.chk_escaleras)
         form_layout.addLayout(chk_layout, 9, 0, 1, 2)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        form_layout.addWidget(self.lbl_error, 10, 0, 1, 2)
+
         self.viewLayout.addLayout(form_layout)
         self.yesButton.setText("Guardar Estación")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(440)
+
+    def validate(self) -> bool:
+        """
+        Valida rigurosamente los datos del formulario antes de permitir guardar:
+        - Campos obligatorios (código y nombre)
+        - Coordenadas no nulas (rechazo estricto de latitud/longitud = 0 / Null Island)
+        - Límites geográficos WGS84 [-90, 90] y [-180, 180]
+        - Notificación de límites metropolitanos de Nueva York
+        """
+        codigo = self.txt_codigo.text().strip()
+        nombre = self.txt_nombre.text().strip()
+        if not codigo:
+            self.lbl_error.setText("El código identificador de la estación es obligatorio.")
+            self.lbl_error.show()
+            self.txt_codigo.setFocus()
+            return False
+
+        if not nombre:
+            self.lbl_error.setText("El nombre de la estación es obligatorio.")
+            self.lbl_error.show()
+            self.txt_nombre.setFocus()
+            return False
+
+        lat = self.spin_lat.value()
+        lon = self.spin_lon.value()
+
+        # Validación estricta: rechazo de Null Island (0, 0)
+        if lat == 0.0 or lon == 0.0:
+            self.lbl_error.setText("Coordenadas no válidas: Ni la latitud ni la longitud pueden ser 0.0 (Null Island).")
+            self.lbl_error.show()
+            self.spin_lat.setFocus()
+            return False
+
+        if not (-90.0 <= lat <= 90.0):
+            self.lbl_error.setText(f"Latitud fuera de rango ({lat:.4f}). Debe estar entre -90.0 y 90.0.")
+            self.lbl_error.show()
+            self.spin_lat.setFocus()
+            return False
+
+        if not (-180.0 <= lon <= 180.0):
+            self.lbl_error.setText(f"Longitud fuera de rango ({lon:.4f}). Debe estar entre -180.0 y 180.0.")
+            self.lbl_error.show()
+            self.spin_lon.setFocus()
+            return False
+
+        # Rango geográfico aproximado del área metropolitana de Nueva York
+        en_nyc = (40.40 <= lat <= 41.15) and (-74.35 <= lon <= -73.65)
+        if not en_nyc and not getattr(self, "_advertencia_nyc_confirmada", False):
+            self.lbl_error.setText("Aviso: Las coordenadas están fuera del área metropolitana de NY (Lat 40.4-41.1, Lon -74.3 a -73.7). Presiona Guardar nuevamente para confirmar.")
+            self.lbl_error.show()
+            self._advertencia_nyc_confirmada = True
+            return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> dict:
         return {
@@ -164,6 +229,20 @@ class EstacionDialog(MessageBoxBase):
             "cantidad_accesos": 2,
             "cantidad_plataformas": 2
         }
+
+
+MTA_OFFICIAL_COLORS = [
+    ("#EE352E", "Rojo MTA - 7th Ave Express (Líneas 1, 2, 3)"),
+    ("#00933C", "Verde MTA - Lexington Ave (Líneas 4, 5, 6)"),
+    ("#0039A6", "Azul MTA - 8th Ave Express (Líneas A, C, E)"),
+    ("#FF6319", "Naranja MTA - 6th Ave (Líneas B, D, F, M)"),
+    ("#FCCC0A", "Amarillo MTA - Broadway (Líneas N, Q, R, W)"),
+    ("#A7A9AC", "Gris MTA - Canarsie (Línea L)"),
+    ("#B933AD", "Morado MTA - Flushing (Línea 7)"),
+    ("#6CBE45", "Verde Lima MTA - Crosstown (Línea G)"),
+    ("#996633", "Marrón MTA - Nassau St (Líneas J, Z)"),
+    ("#808183", "Gris Pizarra MTA - Shuttles (Línea S)"),
+]
 
 
 class LineaDialog(MessageBoxBase):
@@ -199,11 +278,42 @@ class LineaDialog(MessageBoxBase):
         form_layout.addWidget(self.txt_nombre, 1, 1)
 
         # Color oficial MTA
-        form_layout.addWidget(CaptionLabel("Color Oficial (Hex):", self), 2, 0)
+        form_layout.addWidget(CaptionLabel("Color Oficial MTA:", self), 2, 0)
+        color_layout = QHBoxLayout()
+        self.combo_color = ComboBox(self)
+        initial_color = str(data.get("COLOR", "#0039A6")).strip() if self.is_edit else "#0039A6"
+        matched_color = False
+        for hex_val, label in MTA_OFFICIAL_COLORS:
+            self.combo_color.addItem(label, userData=hex_val)
+            if initial_color.upper() == hex_val.upper():
+                matched_color = True
+
+        self.combo_color.addItem("Color Personalizado...", userData="CUSTOM")
+
         self.txt_color = LineEdit(self)
-        self.txt_color.setPlaceholderText("Ej: #0039A6, #EE352E, #B933AD")
-        self.txt_color.setText(str(data.get("COLOR", "#0039A6")) if self.is_edit else "#0039A6")
-        form_layout.addWidget(self.txt_color, 2, 1)
+        self.txt_color.setPlaceholderText("#RRGGBB")
+        self.txt_color.setText(initial_color)
+        self.txt_color.setFixedWidth(85)
+
+        self.btn_pick_color = PushButton("Elegir...", self)
+        self.btn_pick_color.clicked.connect(self.choose_custom_color)
+
+        self.combo_color.currentIndexChanged.connect(self.on_color_combo_changed)
+        if matched_color:
+            idx = self.combo_color.findData(initial_color.upper())
+            if idx < 0:
+                idx = self.combo_color.findData(initial_color)
+            if idx >= 0:
+                self.combo_color.setCurrentIndex(idx)
+        else:
+            idx = self.combo_color.findData("CUSTOM")
+            if idx >= 0:
+                self.combo_color.setCurrentIndex(idx)
+
+        color_layout.addWidget(self.combo_color, 1)
+        color_layout.addWidget(self.txt_color)
+        color_layout.addWidget(self.btn_pick_color)
+        form_layout.addLayout(color_layout, 2, 1)
 
         # Tipo de Servicio
         form_layout.addWidget(CaptionLabel("Tipo de Servicio Principal:", self), 3, 0)
@@ -219,7 +329,7 @@ class LineaDialog(MessageBoxBase):
         self.combo_origen = ComboBox(self)
         self.combo_origen.addItem("(Sin asignar)", userData=None)
         for est in (estaciones or []):
-            self.combo_origen.addItem(f"{est['NOMBRE']} ({est['CODIGO']})", est['ID_ESTACION'])
+            self.combo_origen.addItem(f"{est['NOMBRE']} ({est['CODIGO']})", userData=int(est['ID_ESTACION']))
         if self.is_edit and data.get("ESTACION_ORIGEN_ID") and data.get("ESTACION_ORIGEN_ID") != "-":
             idx = self.combo_origen.findData(int(data["ESTACION_ORIGEN_ID"]))
             if idx >= 0:
@@ -231,7 +341,7 @@ class LineaDialog(MessageBoxBase):
         self.combo_destino = ComboBox(self)
         self.combo_destino.addItem("(Sin asignar)", userData=None)
         for est in (estaciones or []):
-            self.combo_destino.addItem(f"{est['NOMBRE']} ({est['CODIGO']})", est['ID_ESTACION'])
+            self.combo_destino.addItem(f"{est['NOMBRE']} ({est['CODIGO']})", userData=int(est['ID_ESTACION']))
         if self.is_edit and data.get("ESTACION_DESTINO_ID") and data.get("ESTACION_DESTINO_ID") != "-":
             idx = self.combo_destino.findData(int(data["ESTACION_DESTINO_ID"]))
             if idx >= 0:
@@ -247,11 +357,26 @@ class LineaDialog(MessageBoxBase):
         self.spin_longitud.setValue(lon_km)
         form_layout.addWidget(self.spin_longitud, 6, 1)
 
-        # Operador Responsable
-        form_layout.addWidget(CaptionLabel("Operador Responsable:", self), 7, 0)
-        self.txt_operador = LineEdit(self)
-        self.txt_operador.setText(str(data.get("OPERADOR_RESPONSABLE", "NYCT")) if self.is_edit else "NYCT")
-        form_layout.addWidget(self.txt_operador, 7, 1)
+        # Operador Responsable (Persona)
+        form_layout.addWidget(CaptionLabel("Operador Responsable (Persona):", self), 7, 0)
+        self.combo_operador = ComboBox(self)
+        operadores = network_service.get_operadores_linea_combo()
+        current_op = str(data.get("OPERADOR_RESPONSABLE", "")).strip()
+        matched_op = False
+        for op in operadores:
+            full_label = f"{op['NOMBRE_COMPLETO']} ({op.get('CARGO', 'MTA')})"
+            self.combo_operador.addItem(full_label, userData=full_label)
+            if current_op and (current_op == full_label or current_op in full_label):
+                matched_op = True
+
+        if current_op and not matched_op:
+            self.combo_operador.addItem(current_op, userData=current_op)
+            self.combo_operador.setCurrentText(current_op)
+        elif matched_op:
+            idx = self.combo_operador.findData(current_op)
+            if idx >= 0:
+                self.combo_operador.setCurrentIndex(idx)
+        form_layout.addWidget(self.combo_operador, 7, 1)
 
         # Estado Operativo
         form_layout.addWidget(CaptionLabel("Estado Operativo:", self), 8, 0)
@@ -265,18 +390,33 @@ class LineaDialog(MessageBoxBase):
         self.viewLayout.addLayout(form_layout)
         self.yesButton.setText("Guardar Línea")
         self.cancelButton.setText("Cancelar")
-        self.widget.setMinimumWidth(440)
+        self.widget.setMinimumWidth(500)
+
+    def on_color_combo_changed(self):
+        val = self.combo_color.currentData()
+        if val and val != "CUSTOM":
+            self.txt_color.setText(val)
+
+    def choose_custom_color(self):
+        col = QColorDialog.getColor(QColor(self.txt_color.text() or "#0039A6"), self, "Seleccionar Color de Línea")
+        if col.isValid():
+            hex_str = col.name().upper()
+            self.txt_color.setText(hex_str)
+            idx = self.combo_color.findData("CUSTOM")
+            if idx >= 0:
+                self.combo_color.setCurrentIndex(idx)
 
     def get_data(self) -> dict:
+        op_selected = self.combo_operador.currentData() or self.combo_operador.currentText()
         return {
             "codigo": self.txt_codigo.text().strip(),
             "nombre": self.txt_nombre.text().strip(),
-            "color": self.txt_color.text().strip(),
+            "color": self.txt_color.text().strip() or "#0039A6",
             "tipo_servicio": self.combo_servicio.currentText(),
             "origen_id": self.combo_origen.currentData(),
             "destino_id": self.combo_destino.currentData(),
             "longitud_km": self.spin_longitud.value(),
-            "operador": self.txt_operador.text().strip(),
+            "operador": op_selected.strip(),
             "estado_operativo": self.combo_estado.currentText()
         }
 
@@ -351,13 +491,13 @@ class TransferenciaDialog(MessageBoxBase):
         form.addWidget(CaptionLabel("Línea de Origen:", self), 0, 0)
         self.combo_origen = ComboBox(self)
         for l in (lineas or []):
-            self.combo_origen.addItem(f"Línea {l['CODIGO']} - {l['NOMBRE']}", l['ID_LINEA'])
+            self.combo_origen.addItem(f"Línea {l['CODIGO']} - {l['NOMBRE']}", userData=int(l['ID_LINEA']))
         form.addWidget(self.combo_origen, 0, 1)
 
         form.addWidget(CaptionLabel("Línea de Destino (Correspondencia):", self), 1, 0)
         self.combo_destino = ComboBox(self)
         for l in (lineas or []):
-            self.combo_destino.addItem(f"Línea {l['CODIGO']} - {l['NOMBRE']}", l['ID_LINEA'])
+            self.combo_destino.addItem(f"Línea {l['CODIGO']} - {l['NOMBRE']}", userData=int(l['ID_LINEA']))
         if len(lineas or []) > 1:
             self.combo_destino.setCurrentIndex(1)
         form.addWidget(self.combo_destino, 1, 1)
@@ -403,7 +543,7 @@ class AsociarEstacionDialog(MessageBoxBase):
         else:
             self.combo_estacion = ComboBox(self)
             for est in (estaciones_disponibles or []):
-                self.combo_estacion.addItem(f"{est['NOMBRE']} ({est['CODIGO']}) - {est['DISTRITO']}", est['ID_ESTACION'])
+                self.combo_estacion.addItem(f"{est['NOMBRE']} ({est['CODIGO']}) - {est['DISTRITO']}", userData=int(est['ID_ESTACION']))
             form.addWidget(self.combo_estacion, 0, 1)
 
         # Orden secuencial
@@ -521,7 +661,7 @@ class StationsInterface(QWidget):
 
         bar_est.addWidget(CaptionLabel("Estado:", view_estaciones))
         self.combo_filtro_estado = ComboBox(view_estaciones)
-        self.combo_filtro_estado.addItems(["(Todos)", "Operativa", "Cerrada", "Cerrada Temporalmente"])
+        self.combo_filtro_estado.addItems(["(Todos)", "Operativa", "Cerrada", "Cerrada Temporalmente", "Inactiva"])
         self.combo_filtro_estado.currentIndexChanged.connect(self.apply_station_filters)
         bar_est.addWidget(self.combo_filtro_estado, stretch=2)
 
@@ -542,6 +682,10 @@ class StationsInterface(QWidget):
         self.btn_estado_estacion.clicked.connect(self.handle_cambiar_estado_estacion)
         bar_est.addWidget(self.btn_estado_estacion)
 
+        self.btn_eliminar_estacion = PushButton("Eliminar Estación", view_estaciones, FIF.DELETE)
+        self.btn_eliminar_estacion.clicked.connect(self.handle_eliminar_estacion)
+        bar_est.addWidget(self.btn_eliminar_estacion)
+
         v_est_layout.addLayout(bar_est)
 
         # Tabla Principal de Estaciones
@@ -551,9 +695,7 @@ class StationsInterface(QWidget):
         self.table_stations.setHorizontalHeaderLabels([
             "Código", "Nombre", "Distrito", "Tipo", "Plataformas", "Líneas Conectadas", "Accesibilidad ADA", "Estado"
         ])
-        header_s = self.table_stations.horizontalHeader()
-        if header_s is not None:
-            header_s.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_stations, min_col_width=75)
         self.table_stations.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_stations.setSelectionBehavior(TableWidget.SelectRows)
         self.table_stations.itemSelectionChanged.connect(self.on_station_row_selected)
@@ -601,9 +743,7 @@ class StationsInterface(QWidget):
         self.table_plataformas.setBorderVisible(True)
         self.table_plataformas.setColumnCount(4)
         self.table_plataformas.setHorizontalHeaderLabels(["Identificador", "Dirección de Viaje", "Capacidad Aprox.", "Estado Operativo"])
-        h_plat = self.table_plataformas.horizontalHeader()
-        if h_plat is not None:
-            h_plat.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_plataformas, min_col_width=70)
         self.table_plataformas.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_plataformas.setSelectionBehavior(TableWidget.SelectRows)
         v_plat.addWidget(self.table_plataformas)
@@ -618,9 +758,7 @@ class StationsInterface(QWidget):
         self.table_lineas_est.setBorderVisible(True)
         self.table_lineas_est.setColumnCount(6)
         self.table_lineas_est.setHorizontalHeaderLabels(["Línea", "Nombre de Línea", "Color Oficial", "Orden en Recorrido", "Tipo de Servicio", "Estado Línea"])
-        h_lin_est = self.table_lineas_est.horizontalHeader()
-        if h_lin_est is not None:
-            h_lin_est.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_lineas_est, min_col_width=80)
         self.table_lineas_est.setEditTriggers(TableWidget.NoEditTriggers)
         v_lin_est.addWidget(self.table_lineas_est)
         self.stack_est_detail.addWidget(tab_lin_est)
@@ -644,9 +782,7 @@ class StationsInterface(QWidget):
         self.table_trans.setBorderVisible(True)
         self.table_trans.setColumnCount(4)
         self.table_trans.setHorizontalHeaderLabels(["Línea Origen", "Línea Destino (Conexión)", "Tiempo Caminata", "Acción"])
-        h_trans = self.table_trans.horizontalHeader()
-        if h_trans is not None:
-            h_trans.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_trans, min_col_width=80)
         self.table_trans.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_trans.setSelectionBehavior(TableWidget.SelectRows)
         v_trans.addWidget(self.table_trans)
@@ -693,9 +829,7 @@ class StationsInterface(QWidget):
         self.table_lines.setHorizontalHeaderLabels([
             "Código", "Nombre de Línea", "Color Oficial", "Terminal Origen", "Terminal Destino", "Servicio Principal", "Longitud", "Estado Operativo"
         ])
-        h_lines = self.table_lines.horizontalHeader()
-        if h_lines is not None:
-            h_lines.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_lines, min_col_width=80)
         self.table_lines.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_lines.setSelectionBehavior(TableWidget.SelectRows)
         self.table_lines.itemSelectionChanged.connect(self.on_line_row_selected)
@@ -733,9 +867,7 @@ class StationsInterface(QWidget):
         self.table_line_stations.setHorizontalHeaderLabels([
             "Orden Parada", "Código Estación", "Nombre de Estación", "Distrito", "Distancia Anterior (km)", "Tiempo Estimado (min)", "Accesible ADA"
         ])
-        h_ls = self.table_line_stations.horizontalHeader()
-        if h_ls is not None:
-            h_ls.setSectionResizeMode(QHeaderView.Stretch)
+        configure_interactive_table(self.table_line_stations, min_col_width=75)
         self.table_line_stations.setEditTriggers(TableWidget.NoEditTriggers)
         self.table_line_stations.setSelectionBehavior(TableWidget.SelectRows)
         topo_layout.addWidget(self.table_line_stations)
@@ -786,12 +918,20 @@ class StationsInterface(QWidget):
             self.table_stations.setItem(r, 0, QTableWidgetItem(str(row.get("CODIGO", "-"))))
             self.table_stations.setItem(r, 1, QTableWidgetItem(str(row.get("NOMBRE", "-"))))
             self.table_stations.setItem(r, 2, QTableWidgetItem(str(row.get("DISTRITO", "-"))))
-            self.table_stations.setItem(r, 3, QTableWidgetItem(str(row.get("TIPO_ESTACION", "Local"))))
+
+            tipo = str(row.get("TIPO_ESTACION", "Local"))
+            self.table_stations.setCellWidget(r, 3, StatusBadge(tipo, self.table_stations))
+
             self.table_stations.setItem(r, 4, QTableWidgetItem(str(row.get("CANTIDAD_PLATAFORMAS", "0"))))
             self.table_stations.setItem(r, 5, QTableWidgetItem(f"{row.get('TOTAL_LINEAS', 0)} líneas"))
+
             ada_str = "Sí (ADA)" if row.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
-            self.table_stations.setItem(r, 6, QTableWidgetItem(ada_str))
-            self.table_stations.setItem(r, 7, QTableWidgetItem(str(row.get("ESTADO_OPERATIVO", "-"))))
+            self.table_stations.setCellWidget(r, 6, StatusBadge(ada_str, self.table_stations))
+
+            est_op = str(row.get("ESTADO_OPERATIVO", "-"))
+            self.table_stations.setCellWidget(r, 7, StatusBadge(est_op, self.table_stations))
+
+        auto_fit_table_columns(self.table_stations)
 
         # Re-seleccionar primera fila si existe
         if self.estaciones_cache:
@@ -804,12 +944,21 @@ class StationsInterface(QWidget):
         for r, row in enumerate(self.lineas_cache):
             self.table_lines.setItem(r, 0, QTableWidgetItem(str(row.get("CODIGO", "-"))))
             self.table_lines.setItem(r, 1, QTableWidgetItem(str(row.get("NOMBRE", "-"))))
-            self.table_lines.setItem(r, 2, QTableWidgetItem(str(row.get("COLOR", "-"))))
+
+            col_hex = str(row.get("COLOR", "#0039A6")).strip()
+            chip = LineColorChip(col_hex, col_hex, "", self.table_lines)
+            self.table_lines.setCellWidget(r, 2, chip)
+
             self.table_lines.setItem(r, 3, QTableWidgetItem(str(row.get("TERMINAL_ORIGEN", "(No asignada)"))))
             self.table_lines.setItem(r, 4, QTableWidgetItem(str(row.get("TERMINAL_DESTINO", "(No asignada)"))))
             self.table_lines.setItem(r, 5, QTableWidgetItem(str(row.get("TIPO_SERVICIO_PRINCIPAL", "-"))))
             self.table_lines.setItem(r, 6, QTableWidgetItem(f"{row.get('LONGITUD_KM', 0)} km"))
-            self.table_lines.setItem(r, 7, QTableWidgetItem(str(row.get("ESTADO_OPERATIVO", "-"))))
+
+            st = str(row.get("ESTADO_OPERATIVO", "Activa"))
+            badge = StatusBadge(st, self.table_lines)
+            self.table_lines.setCellWidget(r, 7, badge)
+
+        auto_fit_table_columns(self.table_lines)
 
         if self.lineas_cache:
             self.table_lines.selectRow(0)
@@ -844,27 +993,33 @@ class StationsInterface(QWidget):
             self.table_plataformas.setItem(r, 0, QTableWidgetItem(str(p.get("IDENTIFICADOR", "-"))))
             self.table_plataformas.setItem(r, 1, QTableWidgetItem(str(p.get("DIRECCION_VIAJE", "-"))))
             self.table_plataformas.setItem(r, 2, QTableWidgetItem(f"{p.get('CAPACIDAD_APROXIMADA', 0)} pasajeros"))
-            self.table_plataformas.setItem(r, 3, QTableWidgetItem(str(p.get("ESTADO_OPERATIVO", "-"))))
+            self.table_plataformas.setCellWidget(r, 3, StatusBadge(str(p.get("ESTADO_OPERATIVO", "-")), self.table_plataformas))
+        auto_fit_table_columns(self.table_plataformas)
 
         # 2. Líneas que la conectan (Requerimiento 8)
         lins = network_service.get_lineas_por_estacion(id_estacion)
         self.table_lineas_est.setRowCount(len(lins))
         for r, l in enumerate(lins):
-            self.table_lineas_est.setItem(r, 0, QTableWidgetItem(f"Línea {l.get('CODIGO_LINEA')}"))
+            chip = LineColorChip(str(l.get("CODIGO_LINEA", "")), str(l.get("COLOR", "#0039A6")), str(l.get("NOMBRE_LINEA", "")), self.table_lineas_est)
+            self.table_lineas_est.setCellWidget(r, 0, chip)
             self.table_lineas_est.setItem(r, 1, QTableWidgetItem(str(l.get("NOMBRE_LINEA", "-"))))
             self.table_lineas_est.setItem(r, 2, QTableWidgetItem(str(l.get("COLOR", "-"))))
             self.table_lineas_est.setItem(r, 3, QTableWidgetItem(f"Parada #{l.get('ORDEN', '-') }"))
             self.table_lineas_est.setItem(r, 4, QTableWidgetItem(str(l.get("TIPO_SERVICIO_PRINCIPAL", "-"))))
-            self.table_lineas_est.setItem(r, 5, QTableWidgetItem(str(l.get("ESTADO_LINEA", "-"))))
+            self.table_lineas_est.setCellWidget(r, 5, StatusBadge(str(l.get("ESTADO_LINEA", "-")), self.table_lineas_est))
+        auto_fit_table_columns(self.table_lineas_est)
 
         # 3. Transferencias (Requerimiento 7)
         trans = network_service.get_transferencias_estacion(id_estacion)
         self.table_trans.setRowCount(len(trans))
         for r, t in enumerate(trans):
-            self.table_trans.setItem(r, 0, QTableWidgetItem(f"Línea {t.get('CODIGO_ORIG')} ({t.get('NOMBRE_ORIG')})"))
-            self.table_trans.setItem(r, 1, QTableWidgetItem(f"Línea {t.get('CODIGO_DEST')} ({t.get('NOMBRE_DEST')})"))
+            chip_orig = LineColorChip(str(t.get("CODIGO_ORIG", "")), str(t.get("COLOR_ORIG", "#0039A6")), str(t.get("NOMBRE_ORIG", "")), self.table_trans)
+            chip_dest = LineColorChip(str(t.get("CODIGO_DEST", "")), str(t.get("COLOR_DEST", "#0039A6")), str(t.get("NOMBRE_DEST", "")), self.table_trans)
+            self.table_trans.setCellWidget(r, 0, chip_orig)
+            self.table_trans.setCellWidget(r, 1, chip_dest)
             self.table_trans.setItem(r, 2, QTableWidgetItem(f"{t.get('TIEMPO_ESTIMADO_MIN', 3)} minutos"))
-            self.table_trans.setItem(r, 3, QTableWidgetItem("Peatonal Subterránea"))
+            self.table_trans.setCellWidget(r, 3, StatusBadge("Peatonal Subterránea", self.table_trans))
+        auto_fit_table_columns(self.table_trans)
 
     def on_line_row_selected(self):
         selected_items = self.table_lines.selectedItems()
@@ -889,7 +1044,8 @@ class StationsInterface(QWidget):
             self.table_line_stations.setItem(r, 4, QTableWidgetItem(f"{t.get('DISTANCIA_KM', 0)} km"))
             self.table_line_stations.setItem(r, 5, QTableWidgetItem(f"{t.get('TIEMPO_ESTIMADO_MIN', 0)} min"))
             ada = "Sí (ADA)" if t.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
-            self.table_line_stations.setItem(r, 6, QTableWidgetItem(ada))
+            self.table_line_stations.setCellWidget(r, 6, StatusBadge(ada, self.table_line_stations))
+        auto_fit_table_columns(self.table_line_stations)
 
     # ==========================================================================
     # ACCIONES CRUD DE ESTACIONES
@@ -902,6 +1058,13 @@ class StationsInterface(QWidget):
             if not datos["codigo"] or not datos["nombre"]:
                 InfoBar.warning("Campos Requeridos", "El código y el nombre de la estación son obligatorios.", parent=self.window())
                 return
+            if datos["latitud"] == 0.0 or datos["longitud"] == 0.0:
+                InfoBar.error("Coordenadas Inválidas", "Las coordenadas no pueden ser 0.0 (Null Island). Ingrese coordenadas válidas.", parent=self.window())
+                return
+            if not (-90.0 <= datos["latitud"] <= 90.0) or not (-180.0 <= datos["longitud"] <= 180.0):
+                InfoBar.error("Coordenadas Fuera de Rango", "La latitud debe estar en [-90, 90] y la longitud en [-180, 180].", parent=self.window())
+                return
+
             res = network_service.crear_estacion(datos)
             if res.get("success"):
                 InfoBar.success("Estación Creada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
@@ -919,6 +1082,16 @@ class StationsInterface(QWidget):
         dlg = EstacionDialog(estacion_data=est_data, parent=self.window())
         if dlg.exec():
             datos = dlg.get_data()
+            if not datos["nombre"]:
+                InfoBar.warning("Campo Requerido", "El nombre de la estación no puede estar vacío.", parent=self.window())
+                return
+            if datos["latitud"] == 0.0 or datos["longitud"] == 0.0:
+                InfoBar.error("Coordenadas Inválidas", "Las coordenadas no pueden ser 0.0 (Null Island).", parent=self.window())
+                return
+            if not (-90.0 <= datos["latitud"] <= 90.0) or not (-180.0 <= datos["longitud"] <= 180.0):
+                InfoBar.error("Coordenadas Fuera de Rango", "La latitud debe estar en [-90, 90] y la longitud en [-180, 180].", parent=self.window())
+                return
+
             res = network_service.modificar_estacion(int(est_data["ID_ESTACION"]), datos)
             if res.get("success"):
                 InfoBar.success("Estación Actualizada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
@@ -941,6 +1114,108 @@ class StationsInterface(QWidget):
             self.refresh_stations()
         else:
             InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+
+    def handle_eliminar_estacion(self):
+        """
+        Maneja la eliminación o baja operativa de estaciones con protección contra
+        Hard-Delete masivo en cascada y auditoría de integridad relacional.
+        """
+        selected_items = self.table_stations.selectedItems()
+        if not selected_items:
+            InfoBar.warning("Sin Selección", "Selecciona una estación en la tabla para dar de baja o eliminar.", parent=self.window())
+            return
+
+        selected_rows = sorted(list(set(item.row() for item in selected_items)))
+
+        # 1. Protección contra Eliminación Masiva en Cascada
+        if len(selected_rows) > 1:
+            mb = MessageBox(
+                "Protección de Integridad Masiva",
+                f"Has seleccionado {len(selected_rows)} estaciones simultáneamente.\n\n"
+                "Por políticas de seguridad ferroviaria e integridad relacional, el sistema PROHÍBE "
+                "la eliminación física (Hard-Delete) masiva en cascada.\n\n"
+                "¿Deseas aplicar una Baja Operativa Segura (Soft-Delete: marcar como 'Cerrada') "
+                "para estas estaciones preservando la topología y el historial de viajes?",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Confirmar Soft-Delete Masivo")
+            mb.cancelButton.setText("Cancelar Operación")
+            if mb.exec():
+                ids_a_bajar = []
+                for r in selected_rows:
+                    if r < len(self.estaciones_cache):
+                        ids_a_bajar.append(int(self.estaciones_cache[r]["ID_ESTACION"]))
+                res = network_service.dar_de_baja_masiva_estaciones(ids_a_bajar)
+                if res.get("success"):
+                    InfoBar.success("Baja Masiva Segura", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.refresh_stations()
+                else:
+                    InfoBar.error("Error", res.get("error", "Fallo al procesar estaciones."), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+            return
+
+        # 2. Eliminación / Baja Individual con Verificación de Dependencias
+        row = selected_rows[0]
+        if row >= len(self.estaciones_cache):
+            return
+
+        est_data = self.estaciones_cache[row]
+        id_est = int(est_data["ID_ESTACION"])
+        nombre = est_data.get("NOMBRE", "Estación")
+        codigo = est_data.get("CODIGO", "")
+
+        deps = network_service.verificar_dependencias_estacion(id_est)
+
+        if deps["tiene_dependencias"]:
+            detalles_deps = []
+            if deps["lineas"] > 0:
+                detalles_deps.append(f"• {deps['lineas']} líneas troncales vinculadas")
+            if deps["rutas"] > 0:
+                detalles_deps.append(f"• {deps['rutas']} recorridos / rutas programadas")
+            if deps["plataformas"] > 0:
+                detalles_deps.append(f"• {deps['plataformas']} plataformas / andenes")
+            if deps["transferencias"] > 0:
+                detalles_deps.append(f"• {deps['transferencias']} transferencias peatonales")
+            if deps["viajes"] > 0:
+                detalles_deps.append(f"• {deps['viajes']} viajes históricos de pasajeros")
+            if deps["incidentes"] > 0:
+                detalles_deps.append(f"• {deps['incidentes']} incidentes operativos registrados")
+
+            texto_deps = "\n".join(detalles_deps)
+
+            mb = MessageBox(
+                "Baja Operativa Requerida (Soft-Delete)",
+                f"La estación '{nombre}' [{codigo}] posee registros operativos activos en la red:\n\n"
+                f"{texto_deps}\n\n"
+                "Por integridad relacional del sistema MTA, el borrado físico (Hard-Delete) está "
+                "estrictamente bloqueado para evitar la pérdida de registros históricos.\n\n"
+                "¿Deseas realizar una Baja Operativa Segura (Soft-Delete), marcando la estación y sus andenes como 'Cerrada'?",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Ejecutar Baja Operativa")
+            mb.cancelButton.setText("Cancelar")
+            if mb.exec():
+                res = network_service.eliminar_estacion(id_est, forzar_soft_delete=True)
+                if res.get("success"):
+                    InfoBar.success("Estación Desactivada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.refresh_stations()
+                else:
+                    InfoBar.error("Error al Desactivar", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+        else:
+            mb = MessageBox(
+                "Eliminar Estación sin Dependencias",
+                f"La estación '{nombre}' [{codigo}] no tiene líneas, andenes ni viajes asociados.\n\n"
+                "¿Deseas darla de baja operativa (Soft-Delete: 'Cerrada') o cancelar?",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Baja Operativa Segura")
+            mb.cancelButton.setText("Cancelar")
+            if mb.exec():
+                res = network_service.eliminar_estacion(id_est, forzar_soft_delete=True)
+                if res.get("success"):
+                    InfoBar.success("Acción Completada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.refresh_stations()
+                else:
+                    InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
 
     # ==========================================================================
     # ACCIONES DE PLATAFORMAS Y TRANSFERENCIAS (REQUERIMIENTOS 6 Y 7)
@@ -994,6 +1269,12 @@ class StationsInterface(QWidget):
         dlg = TransferenciaDialog(lineas=self.lineas_cache, parent=self.window())
         if dlg.exec():
             d = dlg.get_data()
+            if not d.get("linea_origen_id") or not d.get("linea_destino_id"):
+                InfoBar.warning("Datos Incompletos", "Debes seleccionar las líneas de origen y destino.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                return
+            if d["linea_origen_id"] == d["linea_destino_id"]:
+                InfoBar.error("Líneas Idénticas", "La línea de origen y destino deben ser distintas.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                return
             res = network_service.definir_transferencia(
                 id_estacion=self.selected_station_id,
                 id_linea_origen=d["linea_origen_id"],
@@ -1089,7 +1370,8 @@ class StationsInterface(QWidget):
         dlg = AsociarEstacionDialog(estaciones_disponibles=disponibles, next_order=next_ord, parent=self.window())
         if dlg.exec():
             d = dlg.get_data()
-            if not d["estacion_id"]:
+            if not d.get("estacion_id"):
+                InfoBar.warning("Estación Requerida", "Debes seleccionar una estación válida para asociar.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
                 return
             res = network_service.asociar_estacion_linea(
                 id_linea=self.selected_line_id,

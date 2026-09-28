@@ -1,0 +1,15 @@
+{
+  "include": [
+    "prototypes/desktop"
+  ],
+  "exclude": [
+    "scratch",
+    "**/node_modules",
+    "**/__pycache__"
+  ],
+  "extraPaths": [
+    "prototypes/desktop"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": false
+}

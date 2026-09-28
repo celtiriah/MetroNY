@@ -27,6 +27,9 @@ from qfluentwidgets import (
 )
 
 from services import m3_fleet_service, actions_service
+from views.components import (
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+)
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -95,10 +98,11 @@ class TrenDialog(MessageBoxBase):
         form.addRow("Modelo de Tren:", self.combo_modelo)
 
         # 3. Año de Fabricación
+        max_anio = datetime.now().year + 1
         self.spin_anio = SpinBox(self)
-        self.spin_anio.setRange(1980, 2035)
+        self.spin_anio.setRange(1950, max_anio)
         anio_val = _safe_int(self.tren_data.get("ANIO_FABRICACION")) if self.es_edicion and self.tren_data else datetime.now().year
-        self.spin_anio.setValue(anio_val if anio_val > 1980 else datetime.now().year)
+        self.spin_anio.setValue(anio_val if anio_val >= 1950 else datetime.now().year)
         form.addRow("Año Fabricación:", self.spin_anio)
 
         # 4. Depósito Base
@@ -147,9 +151,99 @@ class TrenDialog(MessageBoxBase):
 
         self.viewLayout.addLayout(form)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        self.viewLayout.addWidget(self.lbl_error)
+
         # Botones
         self.yesButton.setText("Guardar Tren" if self.es_edicion else "Registrar Tren")
         self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(440)
+
+    def validate(self) -> bool:
+        """
+        Valida rigurosamente los datos del formulario antes de procesar:
+        - Código interno obligatorio y de hasta 15 caracteres
+        - Modelo seleccionado
+        - Año entre 1950 y año actual + 1
+        - Odómetro >= 0 e irreversible hacia abajo si es edición
+        - Fechas de inspección con formato válido y prox >= ult
+        """
+        codigo = self.txt_codigo.text().strip()
+        if not codigo:
+            self.lbl_error.setText("El código interno del tren es obligatorio.")
+            self.lbl_error.show()
+            self.txt_codigo.setFocus()
+            return False
+
+        if len(codigo) > 15:
+            self.lbl_error.setText("El código interno no puede exceder 15 caracteres.")
+            self.lbl_error.show()
+            self.txt_codigo.setFocus()
+            return False
+
+        if self.combo_modelo.currentData() is None:
+            self.lbl_error.setText("Debe seleccionar un modelo de tren de la lista.")
+            self.lbl_error.show()
+            self.combo_modelo.setFocus()
+            return False
+
+        anio = self.spin_anio.value()
+        max_anio = datetime.now().year + 1
+        if anio < 1950 or anio > max_anio:
+            self.lbl_error.setText(f"El año de fabricación debe estar entre 1950 y {max_anio}.")
+            self.lbl_error.show()
+            self.spin_anio.setFocus()
+            return False
+
+        km = self.spin_km.value()
+        if km < 0:
+            self.lbl_error.setText("El kilometraje acumulado no puede ser un valor negativo.")
+            self.lbl_error.show()
+            self.spin_km.setFocus()
+            return False
+
+        if self.es_edicion and self.tren_data:
+            km_orig = _safe_float(self.tren_data.get("KILOMETRAJE_ACUMULADO"), 0.0)
+            if km < km_orig:
+                self.lbl_error.setText(f"El kilometraje no puede ser inferior al actual ({km_orig:.1f} km).")
+                self.lbl_error.show()
+                self.spin_km.setFocus()
+                return False
+
+        f_ult_str = self.txt_ult_insp.text().strip()
+        f_prox_str = self.txt_prox_insp.text().strip()
+        d_ult: Optional[date] = None
+        d_prox: Optional[date] = None
+
+        if f_ult_str:
+            try:
+                d_ult = datetime.strptime(f_ult_str, "%Y-%m-%d").date()
+            except ValueError:
+                self.lbl_error.setText("Formato inválido en Última Inspección. Use YYYY-MM-DD.")
+                self.lbl_error.show()
+                self.txt_ult_insp.setFocus()
+                return False
+
+        if f_prox_str:
+            try:
+                d_prox = datetime.strptime(f_prox_str, "%Y-%m-%d").date()
+            except ValueError:
+                self.lbl_error.setText("Formato inválido en Próxima Inspección. Use YYYY-MM-DD.")
+                self.lbl_error.show()
+                self.txt_prox_insp.setFocus()
+                return False
+
+        if d_ult and d_prox and d_prox < d_ult:
+            self.lbl_error.setText("La fecha de próxima inspección no puede ser anterior a la última inspección.")
+            self.lbl_error.show()
+            self.txt_prox_insp.setFocus()
+            return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -197,25 +291,26 @@ class VagonDialog(MessageBoxBase):
                 self.combo_tipo.setCurrentIndex(idx)
         form.addRow("Tipo de Vagón:", self.combo_tipo)
 
-        # 3. Capacidad Sentados
+        # 3. Capacidad Sentados (0 a 200)
         self.spin_sentados = SpinBox(self)
-        self.spin_sentados.setRange(0, 300)
+        self.spin_sentados.setRange(0, 200)
         sent_val = _safe_int(self.vagon_data.get("CAPACIDAD_SENTADOS")) if self.es_edicion and self.vagon_data else 40
         self.spin_sentados.setValue(sent_val)
         form.addRow("Capacidad Sentados:", self.spin_sentados)
 
-        # 4. Capacidad De Pie
+        # 4. Capacidad De Pie (0 a 400)
         self.spin_pie = SpinBox(self)
-        self.spin_pie.setRange(0, 500)
+        self.spin_pie.setRange(0, 400)
         pie_val = _safe_int(self.vagon_data.get("CAPACIDAD_DE_PIE")) if self.es_edicion and self.vagon_data else 160
         self.spin_pie.setValue(pie_val)
         form.addRow("Capacidad De Pie:", self.spin_pie)
 
-        # 5. Año Fabricación
+        # 5. Año Fabricación [1950 .. SYSDATE + 1]
+        max_anio = datetime.now().year + 1
         self.spin_anio = SpinBox(self)
-        self.spin_anio.setRange(1980, 2035)
+        self.spin_anio.setRange(1950, max_anio)
         anio_val = _safe_int(self.vagon_data.get("ANIO_FABRICACION")) if self.es_edicion and self.vagon_data else datetime.now().year
-        self.spin_anio.setValue(anio_val if anio_val > 1980 else datetime.now().year)
+        self.spin_anio.setValue(anio_val if anio_val >= 1950 else datetime.now().year)
         form.addRow("Año Fabricación:", self.spin_anio)
 
         # 6. Accesibilidad PMR
@@ -235,9 +330,62 @@ class VagonDialog(MessageBoxBase):
 
         self.viewLayout.addLayout(form)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        self.viewLayout.addWidget(self.lbl_error)
+
         # Botones
         self.yesButton.setText("Guardar Vagón" if self.es_edicion else "Registrar Vagón")
         self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(440)
+
+    def validate(self) -> bool:
+        """
+        Valida rigurosamente los datos del formulario de vagón:
+        - Número de serie obligatorio y hasta 20 caracteres
+        - Capacidad sentados [0..200]
+        - Capacidad de pie [0..400]
+        - Año de fabricación [1950..año actual + 1]
+        """
+        serie = self.txt_serie.text().strip()
+        if not serie:
+            self.lbl_error.setText("El número de serie del vagón es obligatorio.")
+            self.lbl_error.show()
+            self.txt_serie.setFocus()
+            return False
+
+        if len(serie) > 20:
+            self.lbl_error.setText("El número de serie no puede exceder 20 caracteres.")
+            self.lbl_error.show()
+            self.txt_serie.setFocus()
+            return False
+
+        sentados = self.spin_sentados.value()
+        if sentados < 0 or sentados > 200:
+            self.lbl_error.setText("La capacidad de sentados debe estar entre 0 y 200.")
+            self.lbl_error.show()
+            self.spin_sentados.setFocus()
+            return False
+
+        pie = self.spin_pie.value()
+        if pie < 0 or pie > 400:
+            self.lbl_error.setText("La capacidad de pie debe estar entre 0 y 400.")
+            self.lbl_error.show()
+            self.spin_pie.setFocus()
+            return False
+
+        anio = self.spin_anio.value()
+        max_anio = datetime.now().year + 1
+        if anio < 1950 or anio > max_anio:
+            self.lbl_error.setText(f"El año de fabricación debe estar entre 1950 y {max_anio}.")
+            self.lbl_error.show()
+            self.spin_anio.setFocus()
+            return False
+
+        self.lbl_error.hide()
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -600,9 +748,7 @@ class FleetInterface(QWidget):
             "Capacidad Total", "Kilometraje", "Estado Operativo",
             "Última Insp.", "Próxima Insp.", "Disponibilidad"
         ])
-        ht = self.table_trenes.horizontalHeader()
-        if ht is not None:
-            ht.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_trenes, min_col_width=75)
         self.table_trenes.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_trenes.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_trenes.itemSelectionChanged.connect(self.on_tren_selected)
@@ -644,9 +790,7 @@ class FleetInterface(QWidget):
             "Posición", "N° Serie Vagón", "Tipo de Vagón", "Cap. Sentados",
             "Cap. De Pie", "Capacidad Total", "Accesible PMR", "Fecha Acople"
         ])
-        hc = self.table_composicion.horizontalHeader()
-        if hc is not None:
-            hc.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_composicion, min_col_width=75)
         self.table_composicion.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_composicion.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         comp_layout.addWidget(self.table_composicion)
@@ -711,9 +855,7 @@ class FleetInterface(QWidget):
             "Capacidad Total", "Año Fab.", "Estado", "Accesibilidad PMR",
             "Tren Acoplado", "Posición"
         ])
-        hv = self.table_vagones.horizontalHeader()
-        if hv is not None:
-            hv.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_vagones, min_col_width=75)
         self.table_vagones.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_vagones.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_vagones)
@@ -763,9 +905,7 @@ class FleetInterface(QWidget):
             "Posición", "Capacidad", "Fecha Inicio (Acople)",
             "Fecha Fin (Desacople)", "Estado Asociación"
         ])
-        hh = self.table_historial.horizontalHeader()
-        if hh is not None:
-            hh.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_historial, min_col_width=80)
         self.table_historial.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_historial.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_historial)
@@ -855,9 +995,7 @@ class FleetInterface(QWidget):
             "N° Viaje", "Ruta", "Línea", "Fecha", "Salida Prog.",
             "Llegada Prog.", "Tren Asignado", "Conductor", "Estado Viaje"
         ])
-        hvf = self.table_viajes_flota.horizontalHeader()
-        if hvf is not None:
-            hvf.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        configure_interactive_table(self.table_viajes_flota, min_col_width=75)
         self.table_viajes_flota.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_viajes_flota.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         viajes_layout.addWidget(self.table_viajes_flota)
@@ -950,19 +1088,21 @@ class FleetInterface(QWidget):
             self.table_trenes.setItem(r, 5, QTableWidgetItem(f"{_safe_int(row.get('CAPACIDAD_TOTAL')):,} pax"))
             self.table_trenes.setItem(r, 6, QTableWidgetItem(f"{_safe_float(row.get('KILOMETRAJE_ACUMULADO')):,} km"))
 
-            estado_item = QTableWidgetItem(_safe_str(row.get("ESTADO_OPERATIVO")))
-            self.table_trenes.setItem(r, 7, estado_item)
+            st_op = _safe_str(row.get("ESTADO_OPERATIVO"))
+            self.table_trenes.setCellWidget(r, 7, StatusBadge(st_op, self.table_trenes))
 
             self.table_trenes.setItem(r, 8, QTableWidgetItem(_safe_str(row.get("FECHA_ULTIMA_INSPECCION"))))
 
             prox_insp_str = _safe_str(row.get("FECHA_PROXIMA_INSPECCION"))
-            prox_item = QTableWidgetItem(prox_insp_str)
             if _safe_int(row.get("INSPECCION_VENCIDA")) == 1:
-                prox_item.setText(f"{prox_insp_str} (Vencida)")
-            self.table_trenes.setItem(r, 9, prox_item)
+                self.table_trenes.setCellWidget(r, 9, StatusBadge(f"{prox_insp_str} (Vencida)", self.table_trenes))
+            else:
+                self.table_trenes.setItem(r, 9, QTableWidgetItem(prox_insp_str))
 
             disp_str = "Apto (FN=1)" if _safe_int(row.get("DISPONIBLE_FN")) == 1 else "No Apto (FN=0)"
-            self.table_trenes.setItem(r, 10, QTableWidgetItem(disp_str))
+            self.table_trenes.setCellWidget(r, 10, StatusBadge(disp_str, self.table_trenes))
+
+        auto_fit_table_columns(self.table_trenes)
 
         if filtered and self.table_trenes.rowCount() > 0:
             self.table_trenes.selectRow(0)
@@ -1001,13 +1141,19 @@ class FleetInterface(QWidget):
         for r, row in enumerate(vagones_comp):
             self.table_composicion.setItem(r, 0, QTableWidgetItem(f"Posición {_safe_int(row.get('POSICION'))}"))
             self.table_composicion.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NUMERO_SERIE"))))
-            self.table_composicion.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("TIPO_VAGON"))))
+            tipo_v = _safe_str(row.get("TIPO_VAGON"))
+            self.table_composicion.setCellWidget(r, 2, StatusBadge(tipo_v, self.table_composicion))
+
             self.table_composicion.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("CAPACIDAD_SENTADOS"))))
             self.table_composicion.setItem(r, 4, QTableWidgetItem(_safe_str(row.get("CAPACIDAD_DE_PIE"))))
             self.table_composicion.setItem(r, 5, QTableWidgetItem(f"{_safe_int(row.get('CAPACIDAD_TOTAL')):,} pax"))
+            
             acc_str = "Sí" if _safe_str(row.get("ACCESIBILIDAD")) == "S" else "No"
-            self.table_composicion.setItem(r, 6, QTableWidgetItem(acc_str))
+            self.table_composicion.setCellWidget(r, 6, StatusBadge(acc_str, self.table_composicion))
+
             self.table_composicion.setItem(r, 7, QTableWidgetItem(_safe_str(row.get("FECHA_INICIO"))))
+
+        auto_fit_table_columns(self.table_composicion)
 
     def handle_nuevo_tren(self):
         dlg = TrenDialog(parent=self.window())
@@ -1101,34 +1247,82 @@ class FleetInterface(QWidget):
 
     def handle_eliminar_tren(self):
         if not self.selected_tren_id:
-            InfoBar.warning(title="Selección Requerida", content="Seleccione un tren para eliminar.", parent=self.window(), duration=3000)
+            InfoBar.warning(title="Selección Requerida", content="Seleccione un tren para eliminar o dar de baja.", parent=self.window(), duration=3000)
             return
 
-        box = MessageBox(
-            "Confirmar Eliminación",
-            f"¿Está seguro de que desea eliminar el tren {self.selected_tren_codigo} del sistema?",
-            self.window()
-        )
-        if box.exec():
-            res = m3_fleet_service.eliminar_tren(self.selected_tren_id)
-            if res.get("success"):
-                InfoBar.success(
-                    title="Tren Eliminado",
-                    content=f"Tren {self.selected_tren_codigo} eliminado del sistema.",
-                    parent=self.window(),
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=3500
-                )
-                self.selected_tren_id = None
-                self.load_all_data()
-            else:
-                InfoBar.error(
-                    title="Error al Eliminar",
-                    content=res.get("error", "No se pudo eliminar el tren."),
-                    parent=self.window(),
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=4500
-                )
+        dep = m3_fleet_service.verificar_dependencias_tren(self.selected_tren_id)
+        if not dep.get("success"):
+            InfoBar.error(title="Error de Verificación", content=dep.get("error", "No se pudo auditar las dependencias del tren."), parent=self.window(), duration=4000)
+            return
+
+        cod = dep.get("codigo_interno", self.selected_tren_codigo)
+        vagones_activos = _safe_int(dep.get("vagones_activos_cnt", 0))
+
+        if vagones_activos > 0:
+            InfoBar.warning(
+                title="Vagones Acoplados Activos",
+                content=f"El tren {cod} tiene {vagones_activos} vagón(es) acoplados en su formación actual. Desacóplelos en la pestaña de Composición antes de continuar.",
+                parent=self.window(),
+                duration=5000
+            )
+            return
+
+        if dep.get("tiene_dependencias", False):
+            # Historial operativo detectado: proponer Soft-Delete (Baja Lógica)
+            box = MessageBox(
+                "Baja Lógica Requerida (Integridad Relacional)",
+                f"El tren {cod} posee historial operativo en el sistema ({dep.get('resumen')}).\n\n"
+                f"Por reglas de auditoría e integridad de la base de datos, no es posible su eliminación física.\n\n"
+                f"¿Desea dar de baja lógica al tren marcando su estado como 'Retirado'?",
+                self.window()
+            )
+            if box.exec():
+                res = m3_fleet_service.dar_de_baja_tren(self.selected_tren_id)
+                if res.get("success"):
+                    InfoBar.success(
+                        title="Baja Lógica Aplicada",
+                        content=f"Tren {cod} dado de baja exitosamente (Estado: Retirado, auditado en BITACORA).",
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=3500
+                    )
+                    self.load_all_data()
+                else:
+                    InfoBar.error(
+                        title="Error en Baja Lógica",
+                        content=res.get("error", "No se pudo retirar el tren."),
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=4500
+                    )
+        else:
+            # Sin dependencias: confirmar eliminación física
+            box = MessageBox(
+                "Confirmar Eliminación Física",
+                f"El tren {cod} es un registro nuevo sin viajes, acoplamientos ni mantenimiento asociados.\n\n"
+                f"¿Está seguro de que desea eliminar permanentemente este tren de la base de datos?",
+                self.window()
+            )
+            if box.exec():
+                res = m3_fleet_service.eliminar_tren(self.selected_tren_id)
+                if res.get("success"):
+                    InfoBar.success(
+                        title="Tren Eliminado",
+                        content=f"Tren {cod} eliminado permanentemente del sistema.",
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=3500
+                    )
+                    self.selected_tren_id = None
+                    self.load_all_data()
+                else:
+                    InfoBar.error(
+                        title="Error al Eliminar",
+                        content=res.get("error", "No se pudo eliminar el tren."),
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=4500
+                    )
 
     def open_maintenance_dialog(self):
         """Abre el diálogo para crear una orden de trabajo de taller."""
@@ -1317,20 +1511,28 @@ class FleetInterface(QWidget):
         self.table_vagones.setRowCount(len(filtered))
         for r, row in enumerate(filtered):
             self.table_vagones.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_SERIE"))))
-            self.table_vagones.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("TIPO_VAGON"))))
+            
+            tipo_v = _safe_str(row.get("TIPO_VAGON"))
+            self.table_vagones.setCellWidget(r, 1, StatusBadge(tipo_v, self.table_vagones))
+
             self.table_vagones.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("CAPACIDAD_SENTADOS"))))
             self.table_vagones.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("CAPACIDAD_DE_PIE"))))
             self.table_vagones.setItem(r, 4, QTableWidgetItem(f"{_safe_int(row.get('CAPACIDAD_TOTAL')):,} pax"))
             self.table_vagones.setItem(r, 5, QTableWidgetItem(_safe_str(row.get("ANIO_FABRICACION"))))
-            self.table_vagones.setItem(r, 6, QTableWidgetItem(_safe_str(row.get("ESTADO"))))
-            acc_str = "Sí (PMR)" if _safe_str(row.get("ACCESIBILIDAD")) == "S" else "No"
-            self.table_vagones.setItem(r, 7, QTableWidgetItem(acc_str))
+
+            est_vag = _safe_str(row.get("ESTADO"))
+            self.table_vagones.setCellWidget(r, 6, StatusBadge(est_vag, self.table_vagones))
+
+            acc_str = "Sí" if _safe_str(row.get("ACCESIBILIDAD")) == "S" else "No"
+            self.table_vagones.setCellWidget(r, 7, StatusBadge(acc_str, self.table_vagones))
 
             tren_acop = _safe_str(row.get("TREN_ACOPLADO"))
             self.table_vagones.setItem(r, 8, QTableWidgetItem(tren_acop))
 
             pos_str = f"Pos. {_safe_int(row.get('POSICION_EN_TREN'))}" if row.get("POSICION_EN_TREN") else "-"
             self.table_vagones.setItem(r, 9, QTableWidgetItem(pos_str))
+
+        auto_fit_table_columns(self.table_vagones)
 
     def handle_nuevo_vagon(self):
         dlg = VagonDialog(parent=self.window())
@@ -1444,7 +1646,7 @@ class FleetInterface(QWidget):
     def handle_eliminar_vagon(self):
         selected = self.table_vagones.selectedItems()
         if not selected:
-            InfoBar.warning(title="Selección Requerida", content="Seleccione un vagón para eliminar.", parent=self.window(), duration=3000)
+            InfoBar.warning(title="Selección Requerida", content="Seleccione un vagón para eliminar o retirar.", parent=self.window(), duration=3000)
             return
 
         row = selected[0].row()
@@ -1459,30 +1661,72 @@ class FleetInterface(QWidget):
 
         v_id = _safe_int(vagon.get("ID_VAGON", 0))
 
-        box = MessageBox(
-            "Confirmar Eliminación",
-            f"¿Está seguro de que desea eliminar el vagón {serie} del inventario?",
-            self.window()
-        )
-        if box.exec():
-            res = m3_fleet_service.eliminar_vagon(v_id)
-            if res.get("success"):
-                InfoBar.success(
-                    title="Vagón Eliminado",
-                    content=f"Vagón {serie} eliminado del inventario.",
-                    parent=self.window(),
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=3500
-                )
-                self.refresh_vagones()
-            else:
-                InfoBar.error(
-                    title="Error al Eliminar",
-                    content=res.get("error", "No se pudo eliminar el vagón."),
-                    parent=self.window(),
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=4500
-                )
+        dep = m3_fleet_service.verificar_dependencias_vagon(v_id)
+        if not dep.get("success"):
+            InfoBar.error(title="Error de Verificación", content=dep.get("error", "No se pudo auditar el vagón."), parent=self.window(), duration=4000)
+            return
+
+        if dep.get("esta_acoplado"):
+            InfoBar.warning(
+                title="Vagón en Formación Activa",
+                content=f"El vagón {serie} está acoplado al tren {dep.get('tren_acoplado')}. Debe desacoplarlo en la pestaña de Composición antes de proceder.",
+                parent=self.window(),
+                duration=5000
+            )
+            return
+
+        if dep.get("tiene_historial"):
+            box = MessageBox(
+                "Baja Lógica Requerida (Regla de Negocio 25)",
+                f"El vagón {serie} posee historial en formaciones previas ({dep.get('hist_count')} registro(s)).\n\n"
+                f"Por regla de negocio 25 de integridad de flota, no puede eliminarse físicamente de la base de datos.\n\n"
+                f"¿Desea dar de baja lógica al vagón marcándolo como 'Fuera de Servicio'?",
+                self.window()
+            )
+            if box.exec():
+                res = m3_fleet_service.dar_de_baja_vagon(v_id)
+                if res.get("success"):
+                    InfoBar.success(
+                        title="Baja Lógica Aplicada",
+                        content=f"Vagón {serie} marcado como 'Fuera de Servicio'.",
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=3500
+                    )
+                    self.refresh_vagones()
+                else:
+                    InfoBar.error(
+                        title="Error en Baja Lógica",
+                        content=res.get("error", "No se pudo actualizar el estado."),
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=4500
+                    )
+        else:
+            box = MessageBox(
+                "Confirmar Eliminación Física",
+                f"El vagón {serie} no posee formaciones previas ni historial registrado.\n\n¿Está seguro de que desea eliminar permanentemente este vagón del inventario?",
+                self.window()
+            )
+            if box.exec():
+                res = m3_fleet_service.eliminar_vagon(v_id)
+                if res.get("success"):
+                    InfoBar.success(
+                        title="Vagón Eliminado",
+                        content=f"Vagón {serie} eliminado del inventario.",
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=3500
+                    )
+                    self.refresh_vagones()
+                else:
+                    InfoBar.error(
+                        title="Error al Eliminar",
+                        content=res.get("error", "No se pudo eliminar el vagón."),
+                        parent=self.window(),
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=4500
+                    )
 
     # ==========================================================================
     # LOGICA PESTANA 3: HISTORIAL DE COMPOSICION
@@ -1501,7 +1745,9 @@ class FleetInterface(QWidget):
             self.table_historial.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("ID_TREN_VAGON"))))
             self.table_historial.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("CODIGO_TREN"))))
             self.table_historial.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("NUMERO_VAGON"))))
-            self.table_historial.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("TIPO_VAGON"))))
+            tipo_v = _safe_str(row.get("TIPO_VAGON"))
+            self.table_historial.setCellWidget(r, 3, StatusBadge(tipo_v, self.table_historial))
+
             self.table_historial.setItem(r, 4, QTableWidgetItem(f"Pos. {_safe_int(row.get('POSICION'))}"))
             self.table_historial.setItem(r, 5, QTableWidgetItem(f"{_safe_int(row.get('CAPACIDAD_VAGON')):,} pax"))
             self.table_historial.setItem(r, 6, QTableWidgetItem(_safe_str(row.get("FECHA_INICIO"))))
@@ -1511,7 +1757,9 @@ class FleetInterface(QWidget):
             self.table_historial.setItem(r, 7, QTableWidgetItem(fin_str))
 
             est_asoc = _safe_str(row.get("ESTADO_ASOCIACION"))
-            self.table_historial.setItem(r, 8, QTableWidgetItem(est_asoc))
+            self.table_historial.setCellWidget(r, 8, StatusBadge(est_asoc, self.table_historial))
+
+        auto_fit_table_columns(self.table_historial)
 
     # ==========================================================================
     # LOGICA PESTANA 4: DISPONIBILIDAD Y VIAJES
@@ -1573,7 +1821,11 @@ class FleetInterface(QWidget):
         for r, row in enumerate(viajes):
             self.table_viajes_flota.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_VIAJE"))))
             self.table_viajes_flota.setItem(r, 1, QTableWidgetItem(f"Ruta {_safe_str(row.get('CODIGO_RUTA'))}"))
-            self.table_viajes_flota.setItem(r, 2, QTableWidgetItem(f"Línea {_safe_str(row.get('CODIGO_LINEA'))}"))
+            lin_cod = _safe_str(row.get('CODIGO_LINEA'))
+            lin_col = _safe_str(row.get('COLOR_LINEA', '#0039A6'))
+            chip = LineColorChip(lin_cod, lin_col, f"Línea {lin_cod}", self.table_viajes_flota)
+            self.table_viajes_flota.setCellWidget(r, 2, chip)
+
             self.table_viajes_flota.setItem(r, 3, QTableWidgetItem(_safe_str(row.get("FECHA"))))
             self.table_viajes_flota.setItem(r, 4, QTableWidgetItem(_safe_str(row.get("SALIDA_PROG"))))
             self.table_viajes_flota.setItem(r, 5, QTableWidgetItem(_safe_str(row.get("LLEGADA_PROG"))))
@@ -1583,7 +1835,11 @@ class FleetInterface(QWidget):
             self.table_viajes_flota.setItem(r, 6, QTableWidgetItem(tren_str))
 
             self.table_viajes_flota.setItem(r, 7, QTableWidgetItem(_safe_str(row.get("CONDUCTOR"))))
-            self.table_viajes_flota.setItem(r, 8, QTableWidgetItem(_safe_str(row.get("ESTADO_VIAJE"))))
+            
+            st_viaje = _safe_str(row.get("ESTADO_VIAJE"))
+            self.table_viajes_flota.setCellWidget(r, 8, StatusBadge(st_viaje, self.table_viajes_flota))
+
+        auto_fit_table_columns(self.table_viajes_flota)
 
     def handle_asignar_tren_viaje(self):
         selected = self.table_viajes_flota.selectedItems()
