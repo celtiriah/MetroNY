@@ -2,7 +2,7 @@
 High-level Metro domain service functions.
 Abstracts all SQL queries and data mapping away from the UI views.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 from services.db import execute_query, ACTIVE_PDB
 from config import DB_USER, DB_HOST, DB_PORT
 
@@ -20,7 +20,7 @@ def check_db_health() -> Dict[str, str]:
     }
 
 
-def get_dashboard_kpis() -> Dict[str, str]:
+def get_dashboard_kpis() -> Dict[str, Any]:
     """
     Aggregates main operational KPIs across the system.
     """
@@ -29,9 +29,12 @@ def get_dashboard_kpis() -> Dict[str, str]:
             (SELECT COUNT(*) FROM LINEA) AS TOTAL_LINEAS,
             (SELECT COUNT(*) FROM ESTACION) AS TOTAL_ESTACIONES,
             (SELECT COUNT(*) FROM TREN) AS TOTAL_TRENES,
-            (SELECT COUNT(*) FROM EMPLEADO) AS TOTAL_EMPLEADOS,
-            (SELECT COUNT(*) FROM TARJETA) AS TOTAL_TARJETAS,
-            (SELECT COUNT(*) FROM INCIDENTE WHERE estado != 'Cerrado') AS INCIDENTES_ABIERTOS
+            (SELECT ROUND(COUNT(CASE WHEN estado_operativo IN ('Disponible', 'En Operación') THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 1) FROM TREN) AS DISP_FLOTA,
+            (SELECT ROUND(COUNT(CASE WHEN hora_real_salida <= hora_prog_salida THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 1) FROM VIAJE_PROGRAMADO WHERE hora_real_salida IS NOT NULL) AS OTP_PUNTUALIDAD,
+            (SELECT COUNT(*) FROM VIAJE_PASAJERO) AS TOTAL_PASAJEROS,
+            (SELECT NVL(SUM(monto_cobrado), 0) FROM VIAJE_PASAJERO) AS TOTAL_RECAUDADO,
+            (SELECT COUNT(*) FROM INCIDENTE WHERE estado != 'Cerrado') AS INCIDENTES_ABIERTOS,
+            (SELECT ROUND(COUNT(CASE WHEN accesible_discapacidad = 'S' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 1) FROM ESTACION) AS ACCESIBILIDAD_ADA
         FROM DUAL
     """
     rows = execute_query(sql)["rows"]
@@ -39,8 +42,46 @@ def get_dashboard_kpis() -> Dict[str, str]:
         return rows[0]
     return {
         "TOTAL_LINEAS": "0", "TOTAL_ESTACIONES": "0", "TOTAL_TRENES": "0",
-        "TOTAL_EMPLEADOS": "0", "TOTAL_TARJETAS": "0", "INCIDENTES_ABIERTOS": "0"
+        "DISP_FLOTA": "0", "OTP_PUNTUALIDAD": "0", "TOTAL_PASAJEROS": "0",
+        "TOTAL_RECAUDADO": "0", "INCIDENTES_ABIERTOS": "0", "ACCESIBILIDAD_ADA": "0"
     }
+
+
+def get_dashboard_active_incidents(limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Retrieves the most recent unclosed incidents with affected elements for dashboard display.
+    """
+    sql = f"""
+        SELECT i.numero_incidente, i.tipo, i.nivel_severidad, i.estado,
+               TO_CHAR(i.fecha_hora_inicio, 'YYYY-MM-DD HH24:MI') AS fecha,
+               NVL(e.nombre, NVL(t.codigo_interno, NVL(r.codigo, 'General de Red'))) AS elemento
+        FROM INCIDENTE i
+        LEFT JOIN INCIDENTE_ELEMENTO_AFECTADO a ON i.id_incidente = a.incidente_id
+        LEFT JOIN ESTACION e ON a.estacion_id = e.id_estacion
+        LEFT JOIN TREN t ON a.tren_id = t.id_tren
+        LEFT JOIN RUTA r ON a.ruta_id = r.id_ruta
+        WHERE i.estado != 'Cerrado'
+        ORDER BY i.fecha_hora_inicio DESC
+        FETCH FIRST {limit} ROWS ONLY
+    """
+    return execute_query(sql)["rows"]
+
+
+def get_dashboard_top_stations(limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Retrieves top stations ranked by passenger validations and revenue for dashboard display.
+    """
+    sql = f"""
+        SELECT e.nombre, e.distrito, 
+               COUNT(vp.id_viaje_pasajero) AS total_pasajes,
+               NVL(SUM(vp.monto_cobrado), 0) AS total_monto
+        FROM ESTACION e
+        JOIN VIAJE_PASAJERO vp ON e.id_estacion = vp.estacion_ingreso_id
+        GROUP BY e.nombre, e.distrito
+        ORDER BY total_pasajes DESC, total_monto DESC
+        FETCH FIRST {limit} ROWS ONLY
+    """
+    return execute_query(sql)["rows"]
 
 
 def get_lines_summary() -> List[Dict]:

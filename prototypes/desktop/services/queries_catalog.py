@@ -1,16 +1,26 @@
 """
-Catalogue of the 15 Mandatory SQL Queries required by the Metro NY specification.
+Catalogue of the 15 Mandatory SQL Queries restructured for the
+Centro de Reporteria Analitica y Extraccion de Datos (Business Intelligence).
+
+Organized thematically into 4 core operational areas:
+1. Infraestructura y Red (REP-01 to REP-03)
+2. Operaciones y Servicios de Transporte (REP-04 to REP-07)
+3. Finanzas, Pasajeros y Recaudacion (REP-08 to REP-11)
+4. Flota, Mantenimiento e Incidentes (REP-12 to REP-15)
+
 Supports dynamic parameter injection (stations, routes, dates, thresholds, severity).
 """
 
 CONSULTAS_CATALOGO = {
     1: {
-        "titulo": "1. Líneas que pasan por una estación",
-        "descripcion": "¿Qué líneas pasan por una estación determinada? (Relación N:M entre Línea y Estación)",
+        "codigo": "REP-01",
+        "area": "Infraestructura y Red",
+        "titulo": "REP-01: Densidad de lineas convergentes por estacion",
+        "descripcion": "Analiza la convergencia y densidad de lineas metropolitanas en cada estacion del sistema (Relacion N:M).",
         "params": [
             {
                 "key": "station_code",
-                "label": "Estación:",
+                "label": "Estacion:",
                 "type": "combo",
                 "source": "stations",
                 "default": "TSQ42"
@@ -18,10 +28,10 @@ CONSULTAS_CATALOGO = {
         ],
         "sql_generator": lambda p: (
             """
-            SELECT e.nombre AS "Estación",
-                   e.codigo AS "Código Estación",
-                   l.codigo AS "Línea",
-                   l.nombre AS "Nombre de Línea",
+            SELECT e.nombre AS "Estacion",
+                   e.codigo AS "Codigo Estacion",
+                   l.codigo AS "Linea",
+                   l.nombre AS "Nombre de Linea",
                    l.color  AS "Color Dist.",
                    le.orden AS "Orden Secuencia"
             FROM ESTACION e
@@ -36,12 +46,14 @@ CONSULTAS_CATALOGO = {
         )
     },
     2: {
-        "titulo": "2. Paradas secuenciales de una ruta",
-        "descripcion": "¿Cuáles son las estaciones de una ruta y en qué orden se visitan?",
+        "codigo": "REP-02",
+        "area": "Infraestructura y Red",
+        "titulo": "REP-02: Paradas secuenciales de recorrido por ruta operativa",
+        "descripcion": "Audita la secuencia topologica de estaciones y paradas directas o expresas por itinerario de ruta.",
         "params": [
             {
                 "key": "route_code",
-                "label": "Ruta:",
+                "label": "Ruta Operativa:",
                 "type": "combo",
                 "source": "routes",
                 "default": "RUT-1-SB"
@@ -49,12 +61,12 @@ CONSULTAS_CATALOGO = {
         ],
         "sql_generator": lambda p: (
             """
-            SELECT r.codigo         AS "Código Ruta",
+            SELECT r.codigo         AS "Codigo Ruta",
                    r.sentido        AS "Sentido",
                    rd.orden_llegada AS "Secuencia",
-                   e.nombre         AS "Estación",
+                   e.nombre         AS "Estacion",
                    e.distrito       AS "Distrito",
-                   CASE rd.se_detiene WHEN 'S' THEN 'Sí (Parada)' ELSE 'Pasa Expreso' END AS "Detención"
+                   CASE rd.se_detiene WHEN 'S' THEN 'Si (Parada)' ELSE 'Pasa Expreso' END AS "Detencion"
             FROM RUTA r
             JOIN RUTA_DETALLE rd ON r.id_ruta = rd.ruta_id
             JOIN ESTACION e      ON rd.estacion_id = e.id_estacion
@@ -67,8 +79,10 @@ CONSULTAS_CATALOGO = {
         )
     },
     3: {
-        "titulo": "3. Estaciones de transferencia entre líneas",
-        "descripcion": "¿Qué estaciones permiten transbordo entre líneas y cuál es el tiempo de caminata?",
+        "codigo": "REP-03",
+        "area": "Infraestructura y Red",
+        "titulo": "REP-03: Estaciones de transferencia intermodal y tiempos de conexion",
+        "descripcion": "Monitorea nodos de intercambio modal entre lineas y tiempos estimados de caminata peatonal.",
         "params": [
             {
                 "key": "borough",
@@ -80,10 +94,10 @@ CONSULTAS_CATALOGO = {
         ],
         "sql_generator": lambda p: (
             """
-            SELECT e.nombre AS "Estación de Conexión",
+            SELECT e.nombre AS "Estacion de Conexion",
                    e.distrito AS "Distrito",
-                   lo.codigo || ' (' || lo.color || ')' AS "Línea Origen",
-                   ld.codigo || ' (' || ld.color || ')' AS "Línea Destino",
+                   lo.codigo || ' (' || lo.color || ')' AS "Linea Origen",
+                   ld.codigo || ' (' || ld.color || ')' AS "Linea Destino",
                    t.tiempo_estimado_min AS "Min. Caminata"
             FROM TRANSFERENCIA t
             JOIN ESTACION e  ON t.estacion_id = e.id_estacion
@@ -98,19 +112,21 @@ CONSULTAS_CATALOGO = {
         )
     },
     4: {
-        "titulo": "4. Viajes programados para una fecha",
-        "descripcion": "¿Qué viajes están asignados para una fecha con su tren y conductor?",
+        "codigo": "REP-04",
+        "area": "Operaciones y Servicios de Transporte",
+        "titulo": "REP-04: Programacion de despacho de viajes e itinerario diario",
+        "descripcion": "Audita despachos programados, asignacion de material rodante y personal de conduccion por fecha.",
         "params": [
             {
                 "key": "trip_date",
-                "label": "Fecha (YYYY-MM-DD):",
-                "type": "text",
+                "label": "Fecha de Despacho:",
+                "type": "date",
                 "default": "2026-09-01"
             }
         ],
         "sql_generator": lambda p: (
             """
-            SELECT vp.numero_viaje AS "Número Viaje",
+            SELECT vp.numero_viaje AS "Numero Viaje",
                    r.codigo        AS "Ruta",
                    TO_CHAR(vp.hora_prog_salida, 'HH24:MI') AS "Hora Prog.",
                    t.codigo_interno AS "Tren Asignado",
@@ -129,19 +145,21 @@ CONSULTAS_CATALOGO = {
         )
     },
     5: {
-        "titulo": "5. Viajes con retrasos mayores al umbral",
-        "descripcion": "¿Qué viajes salieron con más de N minutos de demora según el horario programado?",
+        "codigo": "REP-05",
+        "area": "Operaciones y Servicios de Transporte",
+        "titulo": "REP-05: Auditoria de retrasos en salida y cumplimiento horario",
+        "descripcion": "Identifica viajes con desviacion horaria superior al umbral de tolerancia operacional configurado.",
         "params": [
             {
                 "key": "min_delay",
-                "label": "Demora mínima (minutos):",
+                "label": "Demora minima (minutos):",
                 "type": "number",
                 "default": "15"
             }
         ],
         "sql_generator": lambda p: (
             """
-            SELECT vp.numero_viaje  AS "Número Viaje",
+            SELECT vp.numero_viaje  AS "Numero Viaje",
                    r.codigo         AS "Ruta",
                    TO_CHAR(vp.hora_prog_salida, 'HH24:MI') AS "Salida Prog.",
                    TO_CHAR(vp.hora_real_salida, 'HH24:MI') AS "Salida Real",
@@ -157,74 +175,10 @@ CONSULTAS_CATALOGO = {
         )
     },
     6: {
-        "titulo": "6. Trenes por estado operativo",
-        "descripcion": "¿Qué unidades de material rodante están operativas y listas para el servicio?",
-        "params": [
-            {
-                "key": "status",
-                "label": "Estado Operativo:",
-                "type": "combo",
-                "options": ["(Todos)", "Disponible", "En Operación", "En Mantenimiento", "Fuera de Servicio", "Retirado"],
-                "default": "Disponible"
-            }
-        ],
-        "sql_generator": lambda p: (
-            """
-            SELECT t.codigo_interno  AS "Código Tren",
-                   m.nombre_modelo   AS "Modelo",
-                   m.fabricante      AS "Fabricante",
-                   NVL(d.nombre, 'Sin Depósito') AS "Depósito Base",
-                   t.estado_operativo AS "Estado"
-            FROM TREN t
-            JOIN MODELO_TREN m  ON t.modelo_id = m.id_modelo
-            LEFT JOIN DEPOSITO d ON t.deposito_id = d.id_deposito
-            """ + (
-                " WHERE t.estado_operativo = :status " if p.get("status") and p.get("status") != "(Todos)" else ""
-            ) + """
-            ORDER BY t.codigo_interno
-            """,
-            {"status": p.get("status")} if p.get("status") and p.get("status") != "(Todos)" else {}
-        )
-    },
-    7: {
-        "titulo": "7. Trenes con inspección vencida o en taller",
-        "descripcion": "¿Qué trenes requieren mantenimiento preventivo inmediato o están en reparación?",
-        "params": [
-            {
-                "key": "filter_type",
-                "label": "Condición requerida:",
-                "type": "combo",
-                "options": ["(Todos)", "Solo En Taller (Mantenimiento)", "Solo Inspección Vencida"],
-                "default": "(Todos)"
-            }
-        ],
-        "sql_generator": lambda p: (
-            """
-            SELECT t.codigo_interno  AS "Tren",
-                   m.nombre_modelo   AS "Modelo",
-                   t.kilometraje_acumulado AS "Kilometraje",
-                   TO_CHAR(t.fecha_ultima_inspeccion, 'YYYY-MM-DD') AS "Última Insp.",
-                   TO_CHAR(t.fecha_proxima_inspeccion, 'YYYY-MM-DD') AS "Próxima Insp.",
-                   CASE 
-                       WHEN t.estado_operativo = 'En Mantenimiento' THEN 'EN TALLER (Correctivo)'
-                       WHEN t.fecha_proxima_inspeccion < SYSDATE    THEN 'VENCIDO - INSPECCIONAR'
-                       ELSE 'Al Día'
-                   END AS "Condición"
-            FROM TREN t
-            JOIN MODELO_TREN m ON t.modelo_id = m.id_modelo
-            WHERE """ + (
-                "t.estado_operativo = 'En Mantenimiento'" if p.get("filter_type") == "Solo En Taller (Mantenimiento)" else
-                ("t.fecha_proxima_inspeccion < SYSDATE" if p.get("filter_type") == "Solo Inspección Vencida" else
-                "(t.fecha_proxima_inspeccion < SYSDATE OR t.estado_operativo = 'En Mantenimiento')")
-            ) + """
-            ORDER BY t.fecha_proxima_inspeccion
-            """,
-            {}
-        )
-    },
-    8: {
-        "titulo": "8. Asignación de conductor y certificación por viaje",
-        "descripcion": "¿Qué conductor operó cada viaje y cuál es su licencia de conducción MTA?",
+        "codigo": "REP-06",
+        "area": "Operaciones y Servicios de Transporte",
+        "titulo": "REP-06: Asignacion de personal de conduccion y certificaciones activas",
+        "descripcion": "Verifica habilitacion tecnica y vigencia de licencias MTA del personal asignado a servicios de tren.",
         "params": [
             {
                 "key": "conductor_query",
@@ -254,14 +208,39 @@ CONSULTAS_CATALOGO = {
             {"cond": p.get("conductor_query")} if p.get("conductor_query") else {}
         )
     },
-    9: {
-        "titulo": "9. Pasajeros transportados por línea",
-        "descripcion": "¿Cuántos pasajeros utilizaron cada línea durante el período?",
+    7: {
+        "codigo": "REP-07",
+        "area": "Operaciones y Servicios de Transporte",
+        "titulo": "REP-07: Minutos acumulados de demora y confiabilidad por linea",
+        "descripcion": "Totaliza el tiempo perdido por retrasos operacionales agregados por linea de servicio.",
         "params": [],
         "sql_generator": lambda p: (
             """
-            SELECT l.codigo          AS "Línea",
-                   l.nombre          AS "Nombre de la Línea",
+            SELECT l.codigo AS "Linea",
+                   l.nombre AS "Nombre Linea",
+                   l.color  AS "Color",
+                   COUNT(vp.id_viaje) AS "Viajes Demorados",
+                   NVL(SUM(ROUND((CAST(vp.hora_real_salida AS DATE) - CAST(vp.hora_prog_salida AS DATE)) * 24 * 60)), 0) AS "Minutos Demora"
+            FROM LINEA l
+            JOIN RUTA r ON l.id_linea = r.linea_id
+            JOIN VIAJE_PROGRAMADO vp ON r.id_ruta = vp.ruta_id
+            WHERE vp.hora_real_salida > vp.hora_prog_salida
+            GROUP BY l.codigo, l.nombre, l.color
+            ORDER BY "Minutos Demora" DESC
+            """,
+            {}
+        )
+    },
+    8: {
+        "codigo": "REP-08",
+        "area": "Finanzas, Pasajeros y Recaudacion",
+        "titulo": "REP-08: Afluencia consolidada de pasajeros transportados por linea",
+        "descripcion": "Cuantifica el volumen neto de pasajeros transportados a traves de la red por cada linea metropolitana.",
+        "params": [],
+        "sql_generator": lambda p: (
+            """
+            SELECT l.codigo          AS "Linea",
+                   l.nombre          AS "Nombre de la Linea",
                    COUNT(vp.id_viaje_pasajero) AS "Total Pasajeros"
             FROM LINEA l
             LEFT JOIN RUTA r             ON l.id_linea = r.linea_id
@@ -273,13 +252,15 @@ CONSULTAS_CATALOGO = {
             {}
         )
     },
-    10: {
-        "titulo": "10. Recaudación por fecha, estación y tarifa",
-        "descripcion": "¿Cuánto dinero ingresó al sistema desglosado por estación y perfil de tarjeta?",
+    9: {
+        "codigo": "REP-09",
+        "area": "Finanzas, Pasajeros y Recaudacion",
+        "titulo": "REP-09: Arqueo de recaudacion por estacion y perfil tarifario",
+        "descripcion": "Consolida ingresos financieros y volumen de pasajes validados desglosados por estacion y tarifa.",
         "params": [
             {
                 "key": "station_filter",
-                "label": "Estación:",
+                "label": "Estacion:",
                 "type": "combo",
                 "source": "stations",
                 "default": "(Todas)"
@@ -288,7 +269,7 @@ CONSULTAS_CATALOGO = {
         "sql_generator": lambda p: (
             """
             SELECT TO_CHAR(CAST(vp.fecha_hora_ingreso AS DATE), 'YYYY-MM-DD') AS "Fecha",
-                   e.nombre  AS "Estación de Ingreso",
+                   e.nombre  AS "Estacion de Ingreso",
                    t.nombre  AS "Perfil Tarifa",
                    COUNT(vp.id_viaje_pasajero) AS "Pasajes Validados",
                    SUM(vp.monto_cobrado)       AS "Total Recaudado ($)"
@@ -299,25 +280,27 @@ CONSULTAS_CATALOGO = {
                 " WHERE e.codigo = :st_code " if p.get("station_filter") and p.get("station_filter") != "(Todas)" else ""
             ) + """
             GROUP BY TO_CHAR(CAST(vp.fecha_hora_ingreso AS DATE), 'YYYY-MM-DD'), e.nombre, t.nombre
-            ORDER BY "Fecha", "Estación de Ingreso", "Total Recaudado ($)" DESC
+            ORDER BY "Fecha", "Estacion de Ingreso", "Total Recaudado ($)" DESC
             """,
             {"st_code": p.get("station_filter")} if p.get("station_filter") and p.get("station_filter") != "(Todas)" else {}
         )
     },
-    11: {
-        "titulo": "11. Estaciones con mayor afluencia de pasajeros",
-        "descripcion": "Ranking de estaciones con más ingresos de pasajeros registrados en torniquetes",
+    10: {
+        "codigo": "REP-10",
+        "area": "Finanzas, Pasajeros y Recaudacion",
+        "titulo": "REP-10: Ranking de estaciones por volumen de validaciones en torniquetes",
+        "descripcion": "Jerarquiza las estaciones con mayor flujo de entrada segun registros de validacion en torniquetes.",
         "params": [
             {
                 "key": "top_n",
-                "label": "Límite de Estaciones (Top N):",
+                "label": "Limite de Estaciones (Top N):",
                 "type": "number",
                 "default": "10"
             }
         ],
         "sql_generator": lambda p: (
             """
-            SELECT e.nombre   AS "Estación",
+            SELECT e.nombre   AS "Estacion",
                    e.distrito AS "Distrito",
                    COUNT(vp.id_viaje_pasajero) AS "Total Pasajeros Validados"
             FROM ESTACION e
@@ -329,15 +312,155 @@ CONSULTAS_CATALOGO = {
             {"top_n": int(p.get("top_n") or 10)}
         )
     },
+    11: {
+        "codigo": "REP-11",
+        "area": "Finanzas, Pasajeros y Recaudacion",
+        "titulo": "REP-11: Monitoreo de tarjetas OMNY bloqueadas o vencidas en red",
+        "descripcion": "Audita el estado de tarjetas OMNY fuera de servicio, bloqueadas o con vigencia de contrato expirada.",
+        "params": [
+            {
+                "key": "card_status",
+                "label": "Estado Tarjeta:",
+                "type": "combo",
+                "options": ["(Todas irregulares/vencidas)", "Bloqueada", "Vencida", "Activa"],
+                "default": "(Todas irregulares/vencidas)"
+            }
+        ],
+        "sql_generator": lambda p: (
+            """
+            SELECT t.numero_tarjeta        AS "Numero Tarjeta",
+                   tar.nombre              AS "Perfil Tarifa",
+                   NVL(p.nombre, '(Anonima)') AS "Pasajero Titular",
+                   t.saldo_disponible      AS "Saldo ($)",
+                   TO_CHAR(t.fecha_vencimiento, 'YYYY-MM-DD') AS "Vencimiento",
+                   t.estado                AS "Estado Tarjeta"
+            FROM TARJETA t
+            JOIN TARIFA tar ON t.tarifa_id = tar.id_tarifa
+            LEFT JOIN PASAJERO p ON t.pasajero_id = p.id_pasajero
+            """ + (
+                " WHERE t.estado = :status " if p.get("card_status") in ["Bloqueada", "Vencida", "Activa"] else
+                " WHERE t.estado IN ('Bloqueada', 'Vencida') OR t.fecha_vencimiento < SYSDATE "
+            ) + """
+            ORDER BY t.estado, t.fecha_vencimiento
+            """,
+            {"status": p.get("card_status")} if p.get("card_status") in ["Bloqueada", "Vencida", "Activa"] else {}
+        )
+    },
     12: {
-        "titulo": "12. Incidentes abiertos en la red",
-        "descripcion": "Incidentes no resueltos con su nivel de severidad y elemento de la red afectado",
+        "codigo": "REP-12",
+        "area": "Flota, Mantenimiento e Incidentes",
+        "titulo": "REP-12: Disponibilidad y estado operativo de flota de trenes",
+        "descripcion": "Censa el inventario de material rodante clasificado por su condicion operativa y deposito base.",
+        "params": [
+            {
+                "key": "status",
+                "label": "Estado Operativo:",
+                "type": "combo",
+                "options": ["(Todos)", "Disponible", "En Operacion", "En Mantenimiento", "Fuera de Servicio", "Retirado"],
+                "default": "Disponible"
+            }
+        ],
+        "sql_generator": lambda p: (
+            """
+            SELECT t.codigo_interno  AS "Codigo Tren",
+                   m.nombre_modelo   AS "Modelo",
+                   m.fabricante      AS "Fabricante",
+                   NVL(d.nombre, 'Sin Deposito') AS "Deposito Base",
+                   t.estado_operativo AS "Estado"
+            FROM TREN t
+            JOIN MODELO_TREN m  ON t.modelo_id = m.id_modelo
+            LEFT JOIN DEPOSITO d ON t.deposito_id = d.id_deposito
+            """ + (
+                " WHERE t.estado_operativo = :status " if p.get("status") and p.get("status") != "(Todos)" else ""
+            ) + """
+            ORDER BY t.codigo_interno
+            """,
+            {"status": p.get("status")} if p.get("status") and p.get("status") != "(Todos)" else {}
+        )
+    },
+    13: {
+        "codigo": "REP-13",
+        "area": "Flota, Mantenimiento e Incidentes",
+        "titulo": "REP-13: Control de flota con inspeccion vencida o en taller correctivo",
+        "descripcion": "Detecta unidades de tren que requieren inspeccion inmediata o estan asignadas a mantenimiento correctivo.",
+        "params": [
+            {
+                "key": "filter_type",
+                "label": "Condicion requerida:",
+                "type": "combo",
+                "options": ["(Todos)", "Solo En Taller (Mantenimiento)", "Solo Inspeccion Vencida"],
+                "default": "(Todos)"
+            }
+        ],
+        "sql_generator": lambda p: (
+            """
+            SELECT t.codigo_interno  AS "Tren",
+                   m.nombre_modelo   AS "Modelo",
+                   t.kilometraje_acumulado AS "Kilometraje",
+                   TO_CHAR(t.fecha_ultima_inspeccion, 'YYYY-MM-DD') AS "Ultima Insp.",
+                   TO_CHAR(t.fecha_proxima_inspeccion, 'YYYY-MM-DD') AS "Proxima Insp.",
+                   CASE 
+                       WHEN t.estado_operativo = 'En Mantenimiento' THEN 'EN TALLER (Correctivo)'
+                       WHEN t.fecha_proxima_inspeccion < SYSDATE    THEN 'VENCIDO - INSPECCIONAR'
+                       ELSE 'Al Dia'
+                   END AS "Condicion"
+            FROM TREN t
+            JOIN MODELO_TREN m ON t.modelo_id = m.id_modelo
+            WHERE """ + (
+                "t.estado_operativo = 'En Mantenimiento'" if p.get("filter_type") == "Solo En Taller (Mantenimiento)" else
+                ("t.fecha_proxima_inspeccion < SYSDATE" if p.get("filter_type") == "Solo Inspeccion Vencida" else
+                "(t.fecha_proxima_inspeccion < SYSDATE OR t.estado_operativo = 'En Mantenimiento')")
+            ) + """
+            ORDER BY t.fecha_proxima_inspeccion
+            """,
+            {}
+        )
+    },
+    14: {
+        "codigo": "REP-14",
+        "area": "Flota, Mantenimiento e Incidentes",
+        "titulo": "REP-14: Asignacion tecnica y roles en ordenes de mantenimiento",
+        "descripcion": "Detalla tecnicos especialistas asignados y sus roles correspondientes en cada orden de trabajo.",
+        "params": [
+            {
+                "key": "order_num",
+                "label": "Numero de Orden:",
+                "type": "combo",
+                "source": "orders",
+                "default": "(Todas)"
+            }
+        ],
+        "sql_generator": lambda p: (
+            """
+            SELECT om.numero_orden       AS "Orden Mantenimiento",
+                   om.tipo_mantenimiento AS "Tipo",
+                   eq.codigo_equipo      AS "Equipo",
+                   e.nombre_completo     AS "Tecnico Especialista",
+                   ot.rol_en_orden       AS "Rol Desempenado",
+                   om.estado             AS "Estado Orden"
+            FROM ORDEN_MANTENIMIENTO om
+            JOIN EQUIPO eq        ON om.equipo_id = eq.id_equipo
+            JOIN ORDEN_TECNICO ot ON om.id_orden = ot.orden_id
+            JOIN EMPLEADO e       ON ot.empleado_id = e.id_empleado
+            """ + (
+                " WHERE om.numero_orden = :order_num " if p.get("order_num") and p.get("order_num") != "(Todas)" else ""
+            ) + """
+            ORDER BY om.numero_orden, e.nombre_completo
+            """,
+            {"order_num": p.get("order_num")} if p.get("order_num") and p.get("order_num") != "(Todas)" else {}
+        )
+    },
+    15: {
+        "codigo": "REP-15",
+        "area": "Flota, Mantenimiento e Incidentes",
+        "titulo": "REP-15: Auditoria de incidentes criticos y afectaciones en red",
+        "descripcion": "Monitorea incidentes no resueltos, nivel de severidad y elementos afectados (estaciones, trenes o rutas).",
         "params": [
             {
                 "key": "severity",
                 "label": "Nivel de Severidad:",
                 "type": "combo",
-                "options": ["(Todas)", "Bajo", "Medio", "Alto", "Crítico"],
+                "options": ["(Todas)", "Bajo", "Medio", "Alto", "Critico"],
                 "default": "(Todas)"
             }
         ],
@@ -362,91 +485,5 @@ CONSULTAS_CATALOGO = {
             """,
             {"sev": p.get("severity")} if p.get("severity") and p.get("severity") != "(Todas)" else {}
         )
-    },
-    13: {
-        "titulo": "13. Líneas con más minutos de retraso acumulados",
-        "descripcion": "Total de minutos perdidos por demoras operativas agrupados por línea",
-        "params": [],
-        "sql_generator": lambda p: (
-            """
-            SELECT l.codigo AS "Línea",
-                   l.nombre AS "Nombre Línea",
-                   l.color  AS "Color",
-                   COUNT(vp.id_viaje) AS "Viajes Demorados",
-                   NVL(SUM(ROUND((CAST(vp.hora_real_salida AS DATE) - CAST(vp.hora_prog_salida AS DATE)) * 24 * 60)), 0) AS "Minutos Demora"
-            FROM LINEA l
-            JOIN RUTA r ON l.id_linea = r.linea_id
-            JOIN VIAJE_PROGRAMADO vp ON r.id_ruta = vp.ruta_id
-            WHERE vp.hora_real_salida > vp.hora_prog_salida
-            GROUP BY l.codigo, l.nombre, l.color
-            ORDER BY "Minutos Demora" DESC
-            """,
-            {}
-        )
-    },
-    14: {
-        "titulo": "14. Tarjetas OMNY bloqueadas o vencidas",
-        "descripcion": "Tarjetas fuera de servicio o con fecha de vigencia anterior a hoy",
-        "params": [
-            {
-                "key": "card_status",
-                "label": "Estado Tarjeta:",
-                "type": "combo",
-                "options": ["(Todas irregulares/vencidas)", "Bloqueada", "Vencida", "Activa"],
-                "default": "(Todas irregulares/vencidas)"
-            }
-        ],
-        "sql_generator": lambda p: (
-            """
-            SELECT t.numero_tarjeta        AS "Número Tarjeta",
-                   tar.nombre              AS "Perfil Tarifa",
-                   NVL(p.nombre, '(Anónima)') AS "Pasajero Titular",
-                   t.saldo_disponible      AS "Saldo ($)",
-                   TO_CHAR(t.fecha_vencimiento, 'YYYY-MM-DD') AS "Vencimiento",
-                   t.estado                AS "Estado Tarjeta"
-            FROM TARJETA t
-            JOIN TARIFA tar ON t.tarifa_id = tar.id_tarifa
-            LEFT JOIN PASAJERO p ON t.pasajero_id = p.id_pasajero
-            """ + (
-                " WHERE t.estado = :status " if p.get("card_status") in ["Bloqueada", "Vencida", "Activa"] else
-                " WHERE t.estado IN ('Bloqueada', 'Vencida') OR t.fecha_vencimiento < SYSDATE "
-            ) + """
-            ORDER BY t.estado, t.fecha_vencimiento
-            """,
-            {"status": p.get("card_status")} if p.get("card_status") in ["Bloqueada", "Vencida", "Activa"] else {}
-        )
-    },
-    15: {
-        "titulo": "15. Técnicos en órdenes de mantenimiento",
-        "descripcion": "Detalle de técnicos asignados y rol desempeñado en cada trabajo de mantenimiento",
-        "params": [
-            {
-                "key": "order_num",
-                "label": "Número de Orden:",
-                "type": "combo",
-                "source": "orders",
-                "default": "(Todas)"
-            }
-        ],
-        "sql_generator": lambda p: (
-            """
-            SELECT om.numero_orden       AS "Orden Mantenimiento",
-                   om.tipo_mantenimiento AS "Tipo",
-                   eq.codigo_equipo      AS "Equipo",
-                   e.nombre_completo     AS "Técnico Especialista",
-                   ot.rol_en_orden       AS "Rol Desempeñado",
-                   om.estado             AS "Estado Orden"
-            FROM ORDEN_MANTENIMIENTO om
-            JOIN EQUIPO eq        ON om.equipo_id = eq.id_equipo
-            JOIN ORDEN_TECNICO ot ON om.id_orden = ot.orden_id
-            JOIN EMPLEADO e       ON ot.empleado_id = e.id_empleado
-            """ + (
-                " WHERE om.numero_orden = :order_num " if p.get("order_num") and p.get("order_num") != "(Todas)" else ""
-            ) + """
-            ORDER BY om.numero_orden, e.nombre_completo
-            """,
-            {"order_num": p.get("order_num")} if p.get("order_num") and p.get("order_num") != "(Todas)" else {}
-        )
     }
 }
-

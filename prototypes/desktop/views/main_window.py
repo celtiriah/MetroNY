@@ -64,7 +64,7 @@ class MetroFluentApp(FluentWindow):
         # 2. Módulo 1: Red y Estaciones
         self.addSubInterface(self.stations_interface, FIF.PIN, "M1: Red y Estaciones")
         # 3. Módulo 2: Rutas y Horarios
-        self.addSubInterface(self.routes_interface, FIF.BUS, "M2: Rutas y Horarios")
+        self.addSubInterface(self.routes_interface, FIF.DATE_TIME, "M2: Rutas y Horarios")
         # 4. Módulo 3: Flota y Trenes
         self.addSubInterface(self.fleet_interface, FIF.TRAIN, "M3: Flota y Trenes")
         # 5. Módulo 4: Personal y Turnos
@@ -75,8 +75,8 @@ class MetroFluentApp(FluentWindow):
         self.addSubInterface(self.maintenance_interface, FIF.DEVELOPER_TOOLS, "M6: Mantenimiento")
         # 8. Módulo 7: Incidentes Operativos
         self.addSubInterface(self.incidents_interface, FIF.INFO, "M7: Incidentes")
-        # 9. Consultas Mínimas Obligatorias
-        self.addSubInterface(self.queries_interface, FIF.SEARCH, "15 Consultas Mínimas")
+        # 9. Centro de Reporteria Analitica (BI)
+        self.addSubInterface(self.queries_interface, FIF.PIE_SINGLE, "Centro de Reportería")
 
     def init_title_bar_actions(self):
         # Quick action buttons decoupled from navigation selection slider
@@ -215,6 +215,12 @@ class MetroFluentApp(FluentWindow):
 
             kpis = metro_service.get_dashboard_kpis()
             self.dashboard_interface.update_kpis(kpis)
+
+            incidents = metro_service.get_dashboard_active_incidents(5)
+            self.dashboard_interface.update_active_incidents(incidents)
+
+            top_stations = metro_service.get_dashboard_top_stations(5)
+            self.dashboard_interface.update_top_stations(top_stations)
 
             lines = metro_service.get_lines_summary()
             self.dashboard_interface.update_lines(lines)
