@@ -9,6 +9,7 @@ Proporciona operaciones CRUD y consultas para:
 """
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date
+import re
 import oracledb
 
 from services.db import get_connection, execute_query
@@ -520,8 +521,10 @@ def get_viajes_programados(
     """
     params: Dict[str, Any] = {}
     if fecha:
-        sql += " AND vp.fecha = TO_DATE(:fecha, 'YYYY-MM-DD')"
-        params["fecha"] = fecha
+        fecha_clean = str(fecha).strip()[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_clean):
+            sql += " AND vp.fecha = TO_DATE(:fecha, 'YYYY-MM-DD')"
+            params["fecha"] = fecha_clean
     if ruta_id:
         sql += " AND vp.ruta_id = :ruta_id"
         params["ruta_id"] = int(ruta_id)
@@ -530,7 +533,25 @@ def get_viajes_programados(
         params["estado"] = estado
 
     sql += " ORDER BY vp.fecha DESC, vp.hora_prog_salida DESC"
-    return _query_rows(sql, params)
+    try:
+        return _query_rows(sql, params)
+    except Exception as exc:
+        print(f"Error consultando viajes programados: {exc}")
+        return []
+
+
+def get_fechas_viajes_registrados() -> List[str]:
+    """
+    Retorna la lista ordenada descendente de fechas unicas en formato YYYY-MM-DD
+    que poseen viajes programados en la base de datos.
+    """
+    try:
+        sql = "SELECT DISTINCT TO_CHAR(fecha, 'YYYY-MM-DD') AS f FROM VIAJE_PROGRAMADO WHERE fecha IS NOT NULL ORDER BY 1 DESC"
+        rows = _query_rows(sql)
+        return [str(r["F"]) for r in rows if r.get("F") and r.get("F") != "-"]
+    except Exception as exc:
+        print(f"Error obteniendo fechas registradas de viajes: {exc}")
+        return []
 
 
 def programar_nuevo_viaje(

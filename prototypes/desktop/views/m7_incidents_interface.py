@@ -10,10 +10,10 @@ Cumple estrictamente con los 7 requerimientos del enunciado oficial y las reglas
 7. Metricas estadisticas agregadas de red.
 """
 import html
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List, Dict, Any, Tuple
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
@@ -25,12 +25,13 @@ from qfluentwidgets import (
     CardWidget, ComboBox, LineEdit, SearchLineEdit, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
     SegmentedWidget, MessageBoxBase, MessageBox,
-    FluentIcon as FIF
+    FluentIcon as FIF, CalendarPicker, TimePicker
 )
 
 from services import m7_incidents_service, actions_service
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    to_qdate, qdate_to_iso, create_calendar_picker, create_time_picker
 )
 
 
@@ -219,9 +220,14 @@ class CerrarIncidenteDialog(MessageBoxBase):
         self.spin_pasajeros.setValue(_safe_int(self.incidente.get("PASAJEROS_AFECTADOS_ESTIMADO"), 500))
         form.addRow("Pasajeros Impactados:", self.spin_pasajeros)
 
-        self.txt_fecha_fin = LineEdit(self)
-        self.txt_fecha_fin.setText(datetime.now().strftime("%Y-%m-%d %H:%M"))
-        form.addRow("Fecha / Hora Cierre:", self.txt_fecha_fin)
+        self.picker_fecha_fin = create_calendar_picker(self, initial_date=date.today(), allow_reset=False)
+        self.picker_hora_fin = create_time_picker(self, initial_time=datetime.now(), allow_reset=False, show_seconds=False)
+        dt_layout = QHBoxLayout()
+        dt_layout.setContentsMargins(0, 0, 0, 0)
+        dt_layout.setSpacing(8)
+        dt_layout.addWidget(self.picker_fecha_fin)
+        dt_layout.addWidget(self.picker_hora_fin)
+        form.addRow("Fecha / Hora Cierre:", dt_layout)
 
         lbl_notice = CaptionLabel(
             "Al cerrar el incidente, su estado pasará a 'Cerrado' y la auditoría quedará registrada en BITACORA.",
@@ -242,6 +248,13 @@ class CerrarIncidenteDialog(MessageBoxBase):
 
         self.yesButton.clicked.disconnect()
         self.yesButton.clicked.connect(self._on_confirm)
+
+    def get_fecha_fin(self) -> str:
+        qdate = self.picker_fecha_fin.getDate()
+        qtime = self.picker_hora_fin.getTime()
+        d_str = qdate.toString(Qt.DateFormat.ISODate) if qdate.isValid() else date.today().strftime("%Y-%m-%d")
+        t_str = qtime.toString("hh:mm") if qtime.isValid() else "12:00"
+        return f"{d_str} {t_str}"
 
     def validate(self) -> bool:
         causa = self.txt_causa.text().strip()
@@ -268,11 +281,10 @@ class CerrarIncidenteDialog(MessageBoxBase):
             self.txt_acciones.setFocus()
             return False
 
-        f_fin = self.txt_fecha_fin.text().strip()
-        if not f_fin:
-            self.lbl_error.setText("Debe especificar la fecha y hora de cierre.")
+        if not self.picker_fecha_fin.getDate().isValid():
+            self.lbl_error.setText("Debe especificar la fecha de cierre.")
             self.lbl_error.show()
-            self.txt_fecha_fin.setFocus()
+            self.picker_fecha_fin.setFocus()
             return False
 
         self.lbl_error.hide()
@@ -726,7 +738,7 @@ class IncidentsInterface(QWidget):
                 causa_identificada=dialog.txt_causa.text(),
                 acciones_realizadas=dialog.txt_acciones.text(),
                 pasajeros_afectados=dialog.spin_pasajeros.value(),
-                fecha_fin=dialog.txt_fecha_fin.text().strip() if dialog.txt_fecha_fin.text().strip() else None
+                fecha_fin=dialog.get_fecha_fin()
             )
 
             if res.get("success"):
@@ -960,7 +972,7 @@ class IncidentsInterface(QWidget):
         self.combo_despacho_inc.currentIndexChanged.connect(self.on_despacho_inc_changed)
         bar_layout.addWidget(self.combo_despacho_inc, stretch=1)
 
-        self.btn_ejecutar_cancelacion = PrimaryPushButton("Despachar Cancelación (SP_CANCELAR_VIAJES_AFECTADOS)", bar_card, FIF.CANCEL)
+        self.btn_ejecutar_cancelacion = PrimaryPushButton("Cancelar", bar_card, FIF.CANCEL)
         self.btn_ejecutar_cancelacion.clicked.connect(self.handle_ejecutar_cancelacion)
         bar_layout.addWidget(self.btn_ejecutar_cancelacion)
 

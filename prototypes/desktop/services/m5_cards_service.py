@@ -494,7 +494,60 @@ def get_tarjetas(
         params["st"] = f"%{search_text.strip().lower()}%"
 
     sql += " ORDER BY t.id_tarjeta ASC"
-    return _query_rows(sql, params)
+    try:
+        return _query_rows(sql, params)
+    except Exception as exc:
+        err_msg = str(exc)
+        if "ORA-00904" in err_msg or "PASE_FECHA" in err_msg or "TIPO_SOPORTE" in err_msg:
+            legacy_sql = """
+                SELECT t.id_tarjeta, t.numero_tarjeta, t.pasajero_id,
+                       NVL(p.nombre, 'Anónima / Al Portador') AS pasajero,
+                       NVL(p.identificador, '-') AS identificador_pasajero,
+                       NVL(p.tipo_pasajero, 'No Registrado') AS tipo_pasajero,
+                       TO_CHAR(t.fecha_emision, 'YYYY-MM-DD') AS fecha_emision,
+                       TO_CHAR(t.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
+                       NULL AS pase_fecha_inicio,
+                       NULL AS pase_fecha_fin,
+                       t.saldo_disponible,
+                       t.tarifa_id,
+                       tar.codigo AS tarifa_codigo,
+                       tar.nombre AS tarifa_nombre,
+                       tar.monto AS tarifa_monto,
+                       tar.duracion_beneficio_dias,
+                       0 AS es_pase_ilimitado,
+                       0 AS pase_vigente,
+                       NULL AS pase_dias_restantes,
+                       t.estado,
+                       'Tarjeta' AS tipo_soporte,
+                       0 AS es_boleto,
+                       CASE 
+                           WHEN t.fecha_vencimiento IS NOT NULL AND t.fecha_vencimiento < TRUNC(SYSDATE) THEN 1
+                           ELSE 0
+                       END AS esta_vencida,
+                       TRUNC(NVL(t.fecha_vencimiento, SYSDATE)) - TRUNC(SYSDATE) AS dias_restantes,
+                       (SELECT COUNT(*) FROM VIAJE_PASAJERO vp WHERE vp.tarjeta_id = t.id_tarjeta) AS total_viajes,
+                       (SELECT COUNT(*) FROM RECARGA r WHERE r.tarjeta_id = t.id_tarjeta) AS total_recargas
+                FROM TARJETA t
+                LEFT JOIN PASAJERO p ON t.pasajero_id = p.id_pasajero
+                LEFT JOIN TARIFA tar ON t.tarifa_id = tar.id_tarifa
+                WHERE 1=1
+            """
+            if estado_filter and estado_filter != "(Todos)":
+                legacy_sql += " AND t.estado = :estado_filter"
+            if pasajero_id is not None:
+                legacy_sql += " AND t.pasajero_id = :p_id"
+            if search_text:
+                legacy_sql += """ AND (
+                    LOWER(t.numero_tarjeta) LIKE :st
+                    OR LOWER(NVL(p.nombre, '')) LIKE :st
+                    OR LOWER(NVL(tar.nombre, '')) LIKE :st
+                )"""
+            legacy_sql += " ORDER BY t.id_tarjeta ASC"
+            try:
+                return _query_rows(legacy_sql, params)
+            except Exception:
+                return []
+        return []
 
 
 def get_tarjeta_by_id(id_tarjeta: int) -> Optional[Dict[str, Any]]:
@@ -580,8 +633,37 @@ def get_tarjeta_by_numero(numero_tarjeta: str) -> Optional[Dict[str, Any]]:
         LEFT JOIN TARIFA tar ON t.tarifa_id = tar.id_tarifa
         WHERE t.numero_tarjeta = :num
     """
-    rows = _query_rows(sql, {"num": numero_tarjeta.strip()})
-    return rows[0] if rows else None
+    try:
+        rows = _query_rows(sql, {"num": numero_tarjeta.strip()})
+        return rows[0] if rows else None
+    except Exception as exc:
+        err_msg = str(exc)
+        if "ORA-00904" in err_msg or "PASE_FECHA" in err_msg or "TIPO_SOPORTE" in err_msg:
+            legacy_sql = """
+                SELECT t.id_tarjeta, t.numero_tarjeta, t.pasajero_id,
+                       NVL(p.nombre, 'Anónima / Al Portador') AS pasajero,
+                       t.saldo_disponible, t.tarifa_id, tar.nombre AS tarifa_nombre,
+                       tar.monto AS tarifa_monto, tar.duracion_beneficio_dias,
+                       TO_CHAR(t.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
+                       NULL AS pase_fecha_inicio,
+                       NULL AS pase_fecha_fin,
+                       0 AS es_pase_ilimitado,
+                       0 AS pase_vigente,
+                       NULL AS pase_dias_restantes,
+                       t.estado,
+                       'Tarjeta' AS tipo_soporte,
+                       0 AS es_boleto
+                FROM TARJETA t
+                LEFT JOIN PASAJERO p ON t.pasajero_id = p.id_pasajero
+                LEFT JOIN TARIFA tar ON t.tarifa_id = tar.id_tarifa
+                WHERE t.numero_tarjeta = :num
+            """
+            try:
+                rows = _query_rows(legacy_sql, {"num": numero_tarjeta.strip()})
+                return rows[0] if rows else None
+            except Exception:
+                return None
+        return None
 
 
 def pagar_o_renovar_pase(

@@ -13,7 +13,7 @@ Cumple estrictamente con los 8 requerimientos del enunciado y las reglas de nego
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout
@@ -23,12 +23,16 @@ from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
-    SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, FluentIcon as FIF
+    SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, FluentIcon as FIF,
+    CalendarPicker
 )
 
 from services import m4_staff_service
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    to_qdate, qdate_to_iso, create_calendar_picker,
+    to_qtime, qtime_to_str, create_time_picker,
+    RecordCalendarPicker
 )
 
 
@@ -148,10 +152,10 @@ class EmpleadoDialog(MessageBoxBase):
         form.addRow("Teléfono:", self.txt_tel)
 
         self.txt_correo = LineEdit(self)
-        self.txt_correo.setPlaceholderText("nombre.apellido@mta.info")
+        self.txt_correo.setPlaceholderText("nombre.apellido@mta.info (Opcional)")
         if self.es_edicion and self.emp_data:
             self.txt_correo.setText(_safe_str(self.emp_data.get("CORREO_ELECTRONICO", "")))
-        form.addRow("Correo Electrónico:", self.txt_correo)
+        form.addRow("Correo Electrónico (Opcional):", self.txt_correo)
 
         # 8. Dirección
         self.txt_dir = LineEdit(self)
@@ -161,17 +165,13 @@ class EmpleadoDialog(MessageBoxBase):
         form.addRow("Dirección:", self.txt_dir)
 
         # 9. Fechas
-        self.txt_fnac = LineEdit(self)
-        self.txt_fnac.setPlaceholderText("YYYY-MM-DD")
-        if self.es_edicion and self.emp_data:
-            self.txt_fnac.setText(_safe_str(self.emp_data.get("FECHA_NACIMIENTO", "")))
-        form.addRow("Fecha Nacimiento:", self.txt_fnac)
+        fnac_val = self.emp_data.get("FECHA_NACIMIENTO") if self.es_edicion and self.emp_data else None
+        self.picker_fnac = create_calendar_picker(self, initial_date=fnac_val, allow_reset=False)
+        form.addRow("Fecha Nacimiento:", self.picker_fnac)
 
-        self.txt_fcont = LineEdit(self)
-        self.txt_fcont.setPlaceholderText("YYYY-MM-DD")
-        if self.es_edicion and self.emp_data:
-            self.txt_fcont.setText(_safe_str(self.emp_data.get("FECHA_CONTRATACION", "")))
-        form.addRow("Fecha Contratación:", self.txt_fcont)
+        fcont_val = self.emp_data.get("FECHA_CONTRATACION") if self.es_edicion and self.emp_data else None
+        self.picker_fcont = create_calendar_picker(self, initial_date=fcont_val, allow_reset=True)
+        form.addRow("Fecha Contratación:", self.picker_fcont)
 
         # 10. Estado Laboral (solo en creación o visual)
         if not self.es_edicion:
@@ -198,7 +198,6 @@ class EmpleadoDialog(MessageBoxBase):
         - Teléfono de contacto obligatorio (comunicación operativa y de emergencia)
         - Mayoría de edad: fecha de nacimiento obligatoria y mínimo 18 años cumplidos
         - Salario positivo > 0
-        - Formatos de fecha YYYY-MM-DD
         """
         nombre = self.txt_nombre.text().strip()
         if not nombre:
@@ -228,37 +227,20 @@ class EmpleadoDialog(MessageBoxBase):
             self.spin_salario.setFocus()
             return False
 
-        fnac_str = self.txt_fnac.text().strip()
-        if not fnac_str:
-            self.lbl_error.setText("La fecha de nacimiento es obligatoria (formato YYYY-MM-DD).")
+        q_nac = self.picker_fnac.getDate()
+        if not q_nac.isValid():
+            self.lbl_error.setText("La fecha de nacimiento es obligatoria.")
             self.lbl_error.show()
-            self.txt_fnac.setFocus()
+            self.picker_fnac.setFocus()
             return False
 
-        try:
-            d_nac = datetime.strptime(fnac_str, "%Y-%m-%d").date()
-            hoy = date.today()
-            edad = hoy.year - d_nac.year - ((hoy.month, hoy.day) < (d_nac.month, d_nac.day))
-            if edad < 18:
-                self.lbl_error.setText(f"El empleado debe tener al menos 18 años cumplidos (edad calculada: {edad} años).")
-                self.lbl_error.show()
-                self.txt_fnac.setFocus()
-                return False
-        except ValueError:
-            self.lbl_error.setText("Formato inválido en fecha de nacimiento. Utilice YYYY-MM-DD.")
+        hoy = date.today()
+        edad = hoy.year - q_nac.year() - ((hoy.month, hoy.day) < (q_nac.month(), q_nac.day()))
+        if edad < 18:
+            self.lbl_error.setText(f"El empleado debe tener al menos 18 años cumplidos (edad calculada: {edad} años).")
             self.lbl_error.show()
-            self.txt_fnac.setFocus()
+            self.picker_fnac.setFocus()
             return False
-
-        fcont_str = self.txt_fcont.text().strip()
-        if fcont_str:
-            try:
-                datetime.strptime(fcont_str, "%Y-%m-%d")
-            except ValueError:
-                self.lbl_error.setText("Formato inválido en fecha de contratación. Utilice YYYY-MM-DD.")
-                self.lbl_error.show()
-                self.txt_fcont.setFocus()
-                return False
 
         self.lbl_error.hide()
         return True
@@ -274,8 +256,8 @@ class EmpleadoDialog(MessageBoxBase):
             "telefono": self.txt_tel.text().strip() or None,
             "correo_electronico": self.txt_correo.text().strip() or None,
             "direccion": self.txt_dir.text().strip() or None,
-            "fecha_nacimiento": self.txt_fnac.text().strip() or None,
-            "fecha_contratacion": self.txt_fcont.text().strip() or None,
+            "fecha_nacimiento": qdate_to_iso(self.picker_fnac.getDate()),
+            "fecha_contratacion": qdate_to_iso(self.picker_fcont.getDate()),
         }
         if not self.es_edicion and hasattr(self, "combo_estado"):
             data["estado_laboral"] = self.combo_estado.currentText()
@@ -330,17 +312,13 @@ class CertificacionDialog(MessageBoxBase):
         form.addRow("Tipo de Certificación:", self.combo_tipo)
 
         # 3. Fechas de Emisión y Vencimiento
-        self.txt_f_emi = LineEdit(self)
-        self.txt_f_emi.setPlaceholderText("YYYY-MM-DD")
-        emi_val = _safe_str(self.cert_data.get("FECHA_EMISION", "")) if self.es_edicion and self.cert_data else date.today().strftime("%Y-%m-%d")
-        self.txt_f_emi.setText(emi_val)
-        form.addRow("Fecha Emisión:", self.txt_f_emi)
+        emi_val = self.cert_data.get("FECHA_EMISION") if self.es_edicion and self.cert_data else date.today()
+        self.picker_f_emi = create_calendar_picker(self, initial_date=emi_val, allow_reset=False)
+        form.addRow("Fecha Emisión:", self.picker_f_emi)
 
-        self.txt_f_venc = LineEdit(self)
-        self.txt_f_venc.setPlaceholderText("YYYY-MM-DD")
-        if self.es_edicion and self.cert_data:
-            self.txt_f_venc.setText(_safe_str(self.cert_data.get("FECHA_VENCIMIENTO", "")))
-        form.addRow("Fecha Vencimiento:", self.txt_f_venc)
+        venc_val = self.cert_data.get("FECHA_VENCIMIENTO") if self.es_edicion and self.cert_data else None
+        self.picker_f_venc = create_calendar_picker(self, initial_date=venc_val, allow_reset=False)
+        form.addRow("Fecha Vencimiento:", self.picker_f_venc)
 
         # 4. Institución Emisora
         self.txt_inst = LineEdit(self)
@@ -408,50 +386,34 @@ class CertificacionDialog(MessageBoxBase):
             self.lbl_error.show()
             return False
 
-        f_emi_str = self.txt_f_emi.text().strip()
-        f_venc_str = self.txt_f_venc.text().strip()
+        d_emi = self.picker_f_emi.getDate()
+        d_venc = self.picker_f_venc.getDate()
 
-        if not f_emi_str:
-            self.lbl_error.setText("La fecha de emisión es obligatoria (formato YYYY-MM-DD).")
+        if not d_emi.isValid():
+            self.lbl_error.setText("La fecha de emisión es obligatoria.")
             self.lbl_error.show()
-            self.txt_f_emi.setFocus()
+            self.picker_f_emi.setFocus()
             return False
 
-        if not f_venc_str:
-            self.lbl_error.setText("La fecha de vencimiento es obligatoria (formato YYYY-MM-DD).")
+        if not d_venc.isValid():
+            self.lbl_error.setText("La fecha de vencimiento es obligatoria.")
             self.lbl_error.show()
-            self.txt_f_venc.setFocus()
-            return False
-
-        try:
-            d_emi = datetime.strptime(f_emi_str, "%Y-%m-%d").date()
-        except ValueError:
-            self.lbl_error.setText("Formato inválido en fecha de emisión. Utilice YYYY-MM-DD.")
-            self.lbl_error.show()
-            self.txt_f_emi.setFocus()
-            return False
-
-        try:
-            d_venc = datetime.strptime(f_venc_str, "%Y-%m-%d").date()
-        except ValueError:
-            self.lbl_error.setText("Formato inválido en fecha de vencimiento. Utilice YYYY-MM-DD.")
-            self.lbl_error.show()
-            self.txt_f_venc.setFocus()
+            self.picker_f_venc.setFocus()
             return False
 
         if d_venc < d_emi:
             self.lbl_error.setText("La fecha de vencimiento no puede ser anterior a la fecha de emisión.")
             self.lbl_error.show()
-            self.txt_f_venc.setFocus()
+            self.picker_f_venc.setFocus()
             return False
 
         # Inmutabilidad de fechas en histórico vencido o revocado
         if self.es_edicion and self.cert_data:
             est_orig = str(self.cert_data.get("ESTADO", ""))
             if est_orig in ("Vencida", "Revocada"):
-                emi_orig = str(self.cert_data.get("FECHA_EMISION", ""))
-                venc_orig = str(self.cert_data.get("FECHA_VENCIMIENTO", ""))
-                if (f_emi_str != emi_orig) or (f_venc_str != venc_orig):
+                emi_orig_qd = to_qdate(self.cert_data.get("FECHA_EMISION"))
+                venc_orig_qd = to_qdate(self.cert_data.get("FECHA_VENCIMIENTO"))
+                if (d_emi != emi_orig_qd) or (d_venc != venc_orig_qd):
                     self.lbl_error.setText(
                         f"Operación rechazada: No se permite modificar las fechas de una certificación en estado '{est_orig}' (registro histórico inmutable)."
                     )
@@ -465,8 +427,8 @@ class CertificacionDialog(MessageBoxBase):
         return {
             "empleado_id": self.combo_emp.currentData(),
             "tipo_certificacion": self.combo_tipo.currentText(),
-            "fecha_emision": self.txt_f_emi.text().strip() or None,
-            "fecha_vencimiento": self.txt_f_venc.text().strip() or None,
+            "fecha_emision": qdate_to_iso(self.picker_f_emi.getDate()),
+            "fecha_vencimiento": qdate_to_iso(self.picker_f_venc.getDate()),
             "institucion_emisora": self.txt_inst.text().strip(),
             "estado": self.combo_estado.currentText()
         }
@@ -511,24 +473,18 @@ class TurnoDialog(MessageBoxBase):
         form.addRow("Empleado Asignado:", self.combo_emp)
 
         # 2. Fecha del Turno
-        self.txt_fecha = LineEdit(self)
-        self.txt_fecha.setPlaceholderText("YYYY-MM-DD")
-        f_val = _safe_str(self.turno_data.get("FECHA", "")) if self.es_edicion and self.turno_data else date.today().strftime("%Y-%m-%d")
-        self.txt_fecha.setText(f_val)
-        form.addRow("Fecha del Turno:", self.txt_fecha)
+        f_val = self.turno_data.get("FECHA") if self.es_edicion and self.turno_data else date.today()
+        self.picker_fecha = create_calendar_picker(self, initial_date=f_val, allow_reset=False)
+        form.addRow("Fecha del Turno:", self.picker_fecha)
 
         # 3. Horas de Inicio y Fin
-        self.txt_h_ini = LineEdit(self)
-        self.txt_h_ini.setPlaceholderText("HH:MI (p.ej. 06:00)")
-        h_ini_val = _safe_str(self.turno_data.get("HORA_INICIO", "06:00")) if self.es_edicion and self.turno_data else "06:00"
-        self.txt_h_ini.setText(h_ini_val)
-        form.addRow("Hora Inicio:", self.txt_h_ini)
+        h_ini_val = self.turno_data.get("HORA_INICIO", "06:00") if self.es_edicion and self.turno_data else "06:00"
+        self.picker_h_ini = create_time_picker(self, initial_time=h_ini_val, allow_reset=False, show_seconds=False)
+        form.addRow("Hora Inicio:", self.picker_h_ini)
 
-        self.txt_h_fin = LineEdit(self)
-        self.txt_h_fin.setPlaceholderText("HH:MI (p.ej. 14:00)")
-        h_fin_val = _safe_str(self.turno_data.get("HORA_FIN", "14:00")) if self.es_edicion and self.turno_data else "14:00"
-        self.txt_h_fin.setText(h_fin_val)
-        form.addRow("Hora Fin:", self.txt_h_fin)
+        h_fin_val = self.turno_data.get("HORA_FIN", "14:00") if self.es_edicion and self.turno_data else "14:00"
+        self.picker_h_fin = create_time_picker(self, initial_time=h_fin_val, allow_reset=False, show_seconds=False)
+        form.addRow("Hora Fin:", self.picker_h_fin)
 
         # 4. Tipo de Lugar y Función
         self.combo_lugar = ComboBox(self)
@@ -584,49 +540,45 @@ class TurnoDialog(MessageBoxBase):
             self.combo_emp.setFocus()
             return False
 
-        f_str = self.txt_fecha.text().strip()
-        if not f_str:
-            self.lbl_error.setText("La fecha del turno es obligatoria (formato YYYY-MM-DD).")
+        qdate = self.picker_fecha.getDate()
+        if not qdate.isValid():
+            self.lbl_error.setText("La fecha del turno es obligatoria.")
             self.lbl_error.show()
-            self.txt_fecha.setFocus()
+            self.picker_fecha.setFocus()
             return False
 
-        try:
-            datetime.strptime(f_str, "%Y-%m-%d")
-        except ValueError:
-            self.lbl_error.setText("Formato inválido en fecha de turno. Utilice YYYY-MM-DD.")
+        f_str = qdate.toString(Qt.DateFormat.ISODate)
+
+        t_ini = self.picker_h_ini.getTime()
+        t_fin = self.picker_h_fin.getTime()
+
+        if not t_ini.isValid():
+            self.lbl_error.setText("La hora de inicio del turno es obligatoria.")
             self.lbl_error.show()
-            self.txt_fecha.setFocus()
+            self.picker_h_ini.setFocus()
             return False
 
-        h_ini_str = self.txt_h_ini.text().strip()
-        h_fin_str = self.txt_h_fin.text().strip()
-
-        if not h_ini_str or not h_fin_str:
-            self.lbl_error.setText("Las horas de inicio y fin son obligatorias (formato HH:MI).")
+        if not t_fin.isValid():
+            self.lbl_error.setText("La hora de fin del turno es obligatoria.")
             self.lbl_error.show()
-            return False
-
-        try:
-            t_ini = datetime.strptime(h_ini_str, "%H:%M")
-            t_fin = datetime.strptime(h_fin_str, "%H:%M")
-        except ValueError:
-            self.lbl_error.setText("Formato inválido en horas del turno. Utilice formato HH:MI (ej. 08:30).")
-            self.lbl_error.show()
+            self.picker_h_fin.setFocus()
             return False
 
         if t_fin <= t_ini:
             self.lbl_error.setText("La hora de fin debe ser posterior a la hora de inicio (no se permiten turnos invertidos).")
             self.lbl_error.show()
-            self.txt_h_fin.setFocus()
+            self.picker_h_fin.setFocus()
             return False
 
-        duracion_horas = (t_fin - t_ini).total_seconds() / 3600.0
+        duracion_horas = t_ini.msecsTo(t_fin) / (1000.0 * 3600.0)
         if duracion_horas > 16.0:
             self.lbl_error.setText(f"La duración ({duracion_horas:.1f} h) excede el límite máximo de 16 horas continuas (normativa MTA).")
             self.lbl_error.show()
-            self.txt_h_fin.setFocus()
+            self.picker_h_fin.setFocus()
             return False
+
+        h_ini_str = t_ini.toString("hh:mm")
+        h_fin_str = t_fin.toString("hh:mm")
 
         excl_id = _safe_int(self.turno_data.get("ID_TURNO")) if self.es_edicion and self.turno_data else None
         conflicto = m4_staff_service.validar_traslape_turno(int(emp_id), f_str, h_ini_str, h_fin_str, excluir_id_turno=excl_id)
@@ -644,9 +596,9 @@ class TurnoDialog(MessageBoxBase):
     def get_data(self) -> Dict[str, Any]:
         return {
             "empleado_id": self.combo_emp.currentData(),
-            "fecha": self.txt_fecha.text().strip(),
-            "hora_inicio": self.txt_h_ini.text().strip(),
-            "hora_fin": self.txt_h_fin.text().strip(),
+            "fecha": qdate_to_iso(self.picker_fecha.getDate()),
+            "hora_inicio": qtime_to_str(self.picker_h_ini.getTime()) or "06:00",
+            "hora_fin": qtime_to_str(self.picker_h_fin.getTime()) or "14:00",
             "tipo_lugar": self.combo_lugar.currentText(),
             "funcion": self.txt_funcion.text().strip(),
             "estado_asistencia": self.combo_asistencia.currentText()
@@ -1029,6 +981,11 @@ class StaffInterface(QWidget):
         self.combo_filtro_turno_emp.currentIndexChanged.connect(self.refresh_turnos)
         bar_filters.addWidget(self.combo_filtro_turno_emp, stretch=3)
 
+        bar_filters.addWidget(CaptionLabel("Fecha:", tab_widget))
+        self.picker_filtro_turno_fecha = RecordCalendarPicker(tab_widget, placeholder_text="Todas las fechas")
+        self.picker_filtro_turno_fecha.dateChanged.connect(self.refresh_turnos)
+        bar_filters.addWidget(self.picker_filtro_turno_fecha, stretch=2)
+
         bar_filters.addWidget(CaptionLabel("Período:", tab_widget))
         self.combo_filtro_turno_tiempo = ComboBox(tab_widget)
         self.combo_filtro_turno_tiempo.addItems(["(Todos)", "Hoy", "Próximos 7 días", "Histórico (Pasados)"])
@@ -1250,6 +1207,7 @@ class StaffInterface(QWidget):
                    txt in str(e.get("CARGO", "")).lower()
             ]
 
+        self.table_empleados.clearContents()
         self.table_empleados.setRowCount(len(filtered))
         for r, row in enumerate(filtered):
             self.table_empleados.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_EMPLEADO"))))
@@ -1267,6 +1225,7 @@ class StaffInterface(QWidget):
             if cert_str != "-":
                 self.table_empleados.setCellWidget(r, 9, StatusBadge(cert_str, self.table_empleados))
             else:
+                self.table_empleados.setCellWidget(r, 9, None)
                 self.table_empleados.setItem(r, 9, QTableWidgetItem("-"))
 
         auto_fit_table_columns(self.table_empleados)
@@ -1310,10 +1269,12 @@ class StaffInterface(QWidget):
 
     def refresh_actividades_empleado(self):
         if not self.selected_empleado_id:
+            self.table_actividades.clearContents()
             self.table_actividades.setRowCount(0)
             return
 
         acts = m4_staff_service.get_actividades_y_turnos_empleado(self.selected_empleado_id)
+        self.table_actividades.clearContents()
         self.table_actividades.setRowCount(len(acts))
 
         for r, row in enumerate(acts):
@@ -1330,10 +1291,12 @@ class StaffInterface(QWidget):
 
     def refresh_subordinados(self):
         if not self.selected_empleado_id:
+            self.table_subordinados.clearContents()
             self.table_subordinados.setRowCount(0)
             return
 
         subs = m4_staff_service.get_subordinados(self.selected_empleado_id)
+        self.table_subordinados.clearContents()
         self.table_subordinados.setRowCount(len(subs))
 
         for r, row in enumerate(subs):
@@ -1509,6 +1472,7 @@ class StaffInterface(QWidget):
             empleado_id=emp_id,
             estado_filter=estado if estado != "(Todos)" else None
         )
+        self.table_certificaciones.clearContents()
         self.table_certificaciones.setRowCount(len(self.certificaciones_cache))
 
         for r, row in enumerate(self.certificaciones_cache):
@@ -1652,12 +1616,21 @@ class StaffInterface(QWidget):
         emp_id = self.combo_filtro_turno_emp.currentData() if hasattr(self, "combo_filtro_turno_emp") else None
         tiempo = self.combo_filtro_turno_tiempo.currentText() if hasattr(self, "combo_filtro_turno_tiempo") else None
 
+        fechas_disp = m4_staff_service.get_fechas_turnos_registrados()
+        if hasattr(self, "picker_filtro_turno_fecha"):
+            self.picker_filtro_turno_fecha.set_available_dates(fechas_disp)
+
+        qd = self.picker_filtro_turno_fecha.getDate() if hasattr(self, "picker_filtro_turno_fecha") else QDate()
+        fecha_filtro = qdate_to_iso(qd) if qd.isValid() else None
+
         self.turnos_cache = m4_staff_service.get_turnos(
+            fecha=fecha_filtro,
             empleado_id=emp_id,
             tipo_lugar=lugar if lugar != "(Todos)" else None,
             estado_asistencia=asist if asist != "(Todos)" else None,
-            filtro_tiempo=tiempo if tiempo != "(Todos)" else None
+            filtro_tiempo=tiempo if (tiempo != "(Todos)" and not fecha_filtro) else None
         )
+        self.table_turnos.clearContents()
         self.table_turnos.setRowCount(len(self.turnos_cache))
 
         for r, row in enumerate(self.turnos_cache):
@@ -1882,6 +1855,7 @@ class StaffInterface(QWidget):
 
     def refresh_viajes_staff(self):
         viajes = m4_staff_service.get_viajes_personal()
+        self.table_viajes_staff.clearContents()
         self.table_viajes_staff.setRowCount(len(viajes))
 
         for r, row in enumerate(viajes):

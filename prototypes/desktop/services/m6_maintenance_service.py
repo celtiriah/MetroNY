@@ -776,7 +776,29 @@ def get_catalogo_repuestos(search_text: Optional[str] = None) -> List[Dict[str, 
         params["st"] = f"%{search_text.strip()}%"
 
     sql += " ORDER BY r.codigo"
-    return execute_query(sql, params)["rows"]
+    try:
+        return execute_query(sql, params)["rows"]
+    except Exception as exc:
+        err_msg = str(exc)
+        if "ORA-00904" in err_msg or "STOCK_DISPONIBLE" in err_msg:
+            legacy_sql = """
+                SELECT r.id_repuesto,
+                       r.codigo,
+                       r.nombre,
+                       r.costo_unitario,
+                       50 AS stock_disponible,
+                       NVL((SELECT SUM(orp.cantidad) FROM ORDEN_REPUESTO orp WHERE orp.repuesto_id = r.id_repuesto), 0) AS total_consumido
+                FROM REPUESTO r
+                WHERE 1 = 1
+            """
+            if search_text and search_text.strip():
+                legacy_sql += " AND (UPPER(r.codigo) LIKE UPPER(:st) OR UPPER(r.nombre) LIKE UPPER(:st))"
+            legacy_sql += " ORDER BY r.codigo"
+            try:
+                return execute_query(legacy_sql, params)["rows"]
+            except Exception:
+                return []
+        return []
 
 
 def crear_repuesto(

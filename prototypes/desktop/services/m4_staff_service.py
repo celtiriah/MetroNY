@@ -13,6 +13,7 @@ Proporciona lógica de negocio y operaciones transaccionales para:
 """
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
+import re
 import oracledb
 
 from services.db import get_connection, execute_query
@@ -206,17 +207,23 @@ def crear_empleado(datos: Dict[str, Any]) -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        cursor.execute("SELECT NVL(MAX(id_empleado), 0) FROM EMPLEADO")
+        max_emp_row = cursor.fetchone()
+        max_emp_id = int(max_emp_row[0]) if max_emp_row and max_emp_row[0] is not None else 0
+
         cursor.execute("SELECT SEQ_EMPLEADO.NEXTVAL FROM DUAL")
         seq_row = cursor.fetchone()
-        new_id = int(seq_row[0]) if seq_row else 1
+        new_id = int(seq_row[0]) if seq_row and seq_row[0] is not None else max_emp_id + 1
 
-        num_emp = datos.get("numero_empleado", "").strip().upper()
+        if new_id <= max_emp_id:
+            new_id = max_emp_id + 1
+
+        num_emp = str(datos.get("numero_empleado") or "").strip().upper()
         if not num_emp:
             num_emp = f"EMP-{new_id:04d}"
 
-        correo = datos.get("correo_electronico", "").strip().lower()
-        if not correo:
-            correo = f"empleado.{new_id}@mta.info"
+        correo_raw = str(datos.get("correo_electronico") or "").strip().lower()
+        correo = correo_raw if correo_raw else None
 
         sql = """
             INSERT INTO EMPLEADO (
@@ -236,7 +243,7 @@ def crear_empleado(datos: Dict[str, Any]) -> Dict[str, Any]:
         params = {
             "id_emp": new_id,
             "num_emp": num_emp,
-            "nombre": datos["nombre_completo"].strip(),
+            "nombre": str(datos.get("nombre_completo") or "").strip(),
             "f_nac": datos.get("fecha_nacimiento") or None,
             "direccion": datos.get("direccion") or None,
             "tel": datos.get("telefono") or None,
@@ -289,14 +296,17 @@ def modificar_empleado(id_empleado: int, datos: Dict[str, Any]) -> Dict[str, Any
                 supervisor_id = :sup_id
             WHERE id_empleado = :id_emp
         """
+        correo_raw = str(datos.get("correo_electronico") or "").strip().lower()
+        correo = correo_raw if correo_raw else None
+
         params = {
             "id_emp": id_empleado,
-            "num_emp": datos["numero_empleado"].strip().upper(),
-            "nombre": datos["nombre_completo"].strip(),
+            "num_emp": str(datos.get("numero_empleado") or "").strip().upper(),
+            "nombre": str(datos.get("nombre_completo") or "").strip(),
             "f_nac": datos.get("fecha_nacimiento") or None,
             "direccion": datos.get("direccion") or None,
             "tel": datos.get("telefono") or None,
-            "correo": datos.get("correo_electronico", "").strip().lower(),
+            "correo": correo,
             "f_cont": datos.get("fecha_contratacion") or None,
             "cargo": datos.get("cargo"),
             "turno": datos.get("turno_habitual") or None,
@@ -800,8 +810,10 @@ def get_turnos(
     """
     params: Dict[str, Any] = {}
     if fecha:
-        sql += " AND t.fecha = TO_DATE(:fecha, 'YYYY-MM-DD')"
-        params["fecha"] = fecha
+        fecha_clean = str(fecha).strip()[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_clean):
+            sql += " AND t.fecha = TO_DATE(:fecha, 'YYYY-MM-DD')"
+            params["fecha"] = fecha_clean
     elif filtro_tiempo and filtro_tiempo != "(Todos)":
         if filtro_tiempo == "Hoy":
             sql += " AND t.fecha = TRUNC(SYSDATE)"
@@ -823,7 +835,25 @@ def get_turnos(
         params["estado_asistencia"] = estado_asistencia
 
     sql += " ORDER BY t.fecha DESC, t.hora_inicio ASC"
-    return _query_rows(sql, params)
+    try:
+        return _query_rows(sql, params)
+    except Exception as exc:
+        print(f"Error consultando turnos: {exc}")
+        return []
+
+
+def get_fechas_turnos_registrados() -> List[str]:
+    """
+    Retorna la lista ordenada descendente de fechas unicas en formato YYYY-MM-DD
+    que poseen turnos programados en la base de datos.
+    """
+    try:
+        sql = "SELECT DISTINCT TO_CHAR(fecha, 'YYYY-MM-DD') AS f FROM TURNO WHERE fecha IS NOT NULL ORDER BY 1 DESC"
+        rows = _query_rows(sql)
+        return [str(r["F"]) for r in rows if r.get("F") and r.get("F") != "-"]
+    except Exception as exc:
+        print(f"Error obteniendo fechas registradas de turnos: {exc}")
+        return []
 
 
 def validar_traslape_turno(
@@ -937,7 +967,7 @@ def crear_turno(datos: Dict[str, Any]) -> Dict[str, Any]:
         cursor.execute("SELECT SEQ_TURNO.NEXTVAL FROM DUAL")
         seq_val = int(cursor.fetchone()[0])
 
-        cod_turno = datos.get("codigo_turno", "").strip().upper()
+        cod_turno = str(datos.get("codigo_turno") or "").strip().upper()
         if not cod_turno:
             cod_turno = f"TUR-{seq_val:06d}"
         else:

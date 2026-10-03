@@ -28,12 +28,13 @@ from qfluentwidgets import (
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
     SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, IconWidget,
-    SingleDirectionScrollArea, FluentIcon as FIF
+    SingleDirectionScrollArea, FluentIcon as FIF, CalendarPicker
 )
 
 from services import m5_cards_service
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    to_qdate, qdate_to_iso, create_calendar_picker
 )
 
 
@@ -260,11 +261,9 @@ class PasajeroDialog(MessageBoxBase):
         form.addRow("Tipo de Pasajero:", self.combo_tipo)
 
         # 4. Fecha de Nacimiento
-        self.txt_fnac = LineEdit(self)
-        self.txt_fnac.setPlaceholderText("YYYY-MM-DD")
-        if self.es_edicion and self.pas_data:
-            self.txt_fnac.setText(_safe_str(self.pas_data.get("FECHA_NACIMIENTO", "")))
-        form.addRow("Fecha Nacimiento:", self.txt_fnac)
+        fnac_val = self.pas_data.get("FECHA_NACIMIENTO") if self.es_edicion and self.pas_data else None
+        self.picker_fnac = create_calendar_picker(self, initial_date=fnac_val, allow_reset=True)
+        form.addRow("Fecha Nacimiento:", self.picker_fnac)
 
         # 5. Teléfono y Correo Electrónico
         self.txt_tel = LineEdit(self)
@@ -309,19 +308,13 @@ class PasajeroDialog(MessageBoxBase):
             self.txt_nombre.setFocus()
             return False
 
-        fnac = self.txt_fnac.text().strip()
-        if fnac:
-            try:
-                d = datetime.strptime(fnac, "%Y-%m-%d").date()
-                if d > date.today():
-                    self.lbl_error.setText("La fecha de nacimiento no puede ser futura.")
-                    self.lbl_error.show()
-                    self.txt_fnac.setFocus()
-                    return False
-            except ValueError:
-                self.lbl_error.setText("Formato de fecha de nacimiento inválido (use AAAA-MM-DD).")
+        q_nac = self.picker_fnac.getDate()
+        if q_nac.isValid():
+            hoy = date.today()
+            if (q_nac.year(), q_nac.month(), q_nac.day()) > (hoy.year, hoy.month, hoy.day):
+                self.lbl_error.setText("La fecha de nacimiento no puede ser futura.")
                 self.lbl_error.show()
-                self.txt_fnac.setFocus()
+                self.picker_fnac.setFocus()
                 return False
 
         correo = self.txt_correo.text().strip()
@@ -343,7 +336,7 @@ class PasajeroDialog(MessageBoxBase):
             "nombre": self.txt_nombre.text().strip(),
             "identificador": self.txt_ident.text().strip(),
             "tipo_pasajero": self.combo_tipo.currentText(),
-            "fecha_nacimiento": self.txt_fnac.text().strip() or None,
+            "fecha_nacimiento": qdate_to_iso(self.picker_fnac.getDate()),
             "telefono": self.txt_tel.text().strip() or None,
             "correo_electronico": self.txt_correo.text().strip() or None,
             "estado": self.combo_estado.currentText()
@@ -405,10 +398,10 @@ class EmitirTarjetaDialog(MessageBoxBase):
         form.addRow("Saldo Inicial:", self.spin_saldo)
 
         # 5. Fecha de Vencimiento
-        self.txt_fvenc = LineEdit(self)
-        default_venc = (date.today().replace(year=date.today().year + 5)).strftime("%Y-%m-%d")
-        self.txt_fvenc.setText(default_venc)
-        form.addRow("Vencimiento:", self.txt_fvenc)
+        # 5. Fecha de Vencimiento
+        default_venc = date.today().replace(year=date.today().year + 5)
+        self.picker_fvenc = create_calendar_picker(self, initial_date=default_venc, allow_reset=False)
+        form.addRow("Vencimiento:", self.picker_fvenc)
 
         # Label de validación
         self.lbl_error = CaptionLabel("", self)
@@ -424,6 +417,11 @@ class EmitirTarjetaDialog(MessageBoxBase):
 
         self.yesButton.clicked.disconnect()
         self.yesButton.clicked.connect(self._on_confirm)
+
+    def set_fecha_vencimiento(self, val: Any):
+        qd = to_qdate(val)
+        if qd is not None:
+            self.picker_fvenc.setDate(qd)
 
     def _update_placeholder_numero(self):
         soporte = self.combo_tipo_soporte.currentData()
@@ -454,16 +452,20 @@ class EmitirTarjetaDialog(MessageBoxBase):
 
             self.spin_saldo.setValue(2.90)
             self.spin_saldo.setEnabled(False)
-            venc_boleto = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
-            self.txt_fvenc.setText(venc_boleto)
+            venc_boleto = date.today() + timedelta(days=1)
+            qd = to_qdate(venc_boleto)
+            if qd is not None:
+                self.picker_fvenc.setDate(qd)
         else:
             self.combo_pasajero.setEnabled(True)
             self.combo_tarifa.setEnabled(True)
             self.combo_tarifa.setToolTip("")
             self.spin_saldo.setEnabled(True)
             self.spin_saldo.setValue(10.00)
-            default_venc = (date.today().replace(year=date.today().year + 5)).strftime("%Y-%m-%d")
-            self.txt_fvenc.setText(default_venc)
+            default_venc = date.today().replace(year=date.today().year + 5)
+            qd = to_qdate(default_venc)
+            if qd is not None:
+                self.picker_fvenc.setDate(qd)
 
         self._update_placeholder_numero()
 
@@ -473,20 +475,19 @@ class EmitirTarjetaDialog(MessageBoxBase):
             self.lbl_error.show()
             return False
 
-        fvenc = self.txt_fvenc.text().strip()
-        if fvenc:
-            try:
-                d = datetime.strptime(fvenc, "%Y-%m-%d").date()
-                if d < date.today():
-                    self.lbl_error.setText("La fecha de vencimiento no puede ser anterior a hoy.")
-                    self.lbl_error.show()
-                    self.txt_fvenc.setFocus()
-                    return False
-            except ValueError:
-                self.lbl_error.setText("Formato de fecha de vencimiento inválido (use AAAA-MM-DD).")
-                self.lbl_error.show()
-                self.txt_fvenc.setFocus()
-                return False
+        q_venc = self.picker_fvenc.getDate()
+        if not q_venc.isValid():
+            self.lbl_error.setText("La fecha de vencimiento es obligatoria.")
+            self.lbl_error.show()
+            self.picker_fvenc.setFocus()
+            return False
+
+        hoy = date.today()
+        if (q_venc.year(), q_venc.month(), q_venc.day()) < (hoy.year, hoy.month, hoy.day):
+            self.lbl_error.setText("La fecha de vencimiento no puede ser anterior a hoy.")
+            self.lbl_error.show()
+            self.picker_fvenc.setFocus()
+            return False
 
         # Validación estricta del prefijo si se ingresa número manualmente
         if self.txt_numero.isEnabled():
@@ -556,7 +557,7 @@ class EmitirTarjetaDialog(MessageBoxBase):
             "pasajero_id": None if soporte == "Boleto" else self.combo_pasajero.currentData(),
             "tarifa_id": self.combo_tarifa.currentData(),
             "saldo_disponible": 2.90 if soporte == "Boleto" else self.spin_saldo.value(),
-            "fecha_vencimiento": self.txt_fvenc.text().strip() or None,
+            "fecha_vencimiento": qdate_to_iso(self.picker_fvenc.getDate()),
             "estado": "Activa"
         }
 
@@ -773,19 +774,13 @@ class TarifaDialog(MessageBoxBase):
         form.addRow("Perfil Beneficiario:", self.combo_tipo)
 
         # 5. Vigencia
-        self.txt_fini = LineEdit(self)
-        self.txt_fini.setPlaceholderText("YYYY-MM-DD")
-        if self.es_edicion and self.tarifa_data:
-            self.txt_fini.setText(_safe_str(self.tarifa_data.get("FECHA_INICIO", "")))
-        else:
-            self.txt_fini.setText(date.today().strftime("%Y-%m-%d"))
-        form.addRow("Inicio Vigencia:", self.txt_fini)
+        fini_val = self.tarifa_data.get("FECHA_INICIO") if self.es_edicion and self.tarifa_data else date.today()
+        self.picker_fini = create_calendar_picker(self, initial_date=fini_val, allow_reset=False)
+        form.addRow("Inicio Vigencia:", self.picker_fini)
 
-        self.txt_ffin = LineEdit(self)
-        self.txt_ffin.setPlaceholderText("YYYY-MM-DD (Opcional)")
-        if self.es_edicion and self.tarifa_data:
-            self.txt_ffin.setText(_safe_str(self.tarifa_data.get("FECHA_FIN", "")))
-        form.addRow("Fin Vigencia:", self.txt_ffin)
+        ffin_val = self.tarifa_data.get("FECHA_FIN") if self.es_edicion and self.tarifa_data else None
+        self.picker_ffin = create_calendar_picker(self, initial_date=ffin_val, allow_reset=True)
+        form.addRow("Fin Vigencia:", self.picker_ffin)
 
         # 6. Estado
         self.combo_estado = ComboBox(self)
@@ -829,6 +824,20 @@ class TarifaDialog(MessageBoxBase):
             self.lbl_error.show()
             return False
 
+        d_ini = self.picker_fini.getDate()
+        if not d_ini.isValid():
+            self.lbl_error.setText("La fecha de inicio de vigencia es obligatoria.")
+            self.lbl_error.show()
+            self.picker_fini.setFocus()
+            return False
+
+        d_fin = self.picker_ffin.getDate()
+        if d_fin.isValid() and d_fin < d_ini:
+            self.lbl_error.setText("La fecha de fin de vigencia no puede ser anterior al inicio.")
+            self.lbl_error.show()
+            self.picker_ffin.setFocus()
+            return False
+
         self.lbl_error.hide()
         return True
 
@@ -842,8 +851,8 @@ class TarifaDialog(MessageBoxBase):
             "nombre": self.txt_nom.text().strip(),
             "monto": self.spin_monto.value(),
             "tipo_pasajero": self.combo_tipo.currentText(),
-            "fecha_inicio_vigencia": self.txt_fini.text().strip() or None,
-            "fecha_fin_vigencia": self.txt_ffin.text().strip() or None,
+            "fecha_inicio_vigencia": qdate_to_iso(self.picker_fini.getDate()),
+            "fecha_fin_vigencia": qdate_to_iso(self.picker_ffin.getDate()),
             "estado": self.combo_estado.currentText()
         }
 
@@ -926,18 +935,26 @@ class CardsInterface(QWidget):
             self.segmented_tabs.setCurrentItem("tab_torniquetes")
 
     def on_tab_changed(self, key: str):
-        if key == "tab_torniquetes":
-            self.stack_views.setCurrentIndex(0)
-            self.refresh_kpis()
-        elif key == "tab_tarjetas":
-            self.stack_views.setCurrentIndex(1)
-            self.refresh_cards_list()
-        elif key == "tab_pasajeros":
-            self.stack_views.setCurrentIndex(2)
-            self.refresh_pasajeros()
-        else:
-            self.stack_views.setCurrentIndex(3)
-            self.refresh_tarifas()
+        try:
+            if key == "tab_torniquetes":
+                self.stack_views.setCurrentIndex(0)
+                self.refresh_kpis()
+            elif key == "tab_tarjetas":
+                self.stack_views.setCurrentIndex(1)
+                self.refresh_cards_list()
+            elif key == "tab_pasajeros":
+                self.stack_views.setCurrentIndex(2)
+                self.refresh_pasajeros()
+            else:
+                self.stack_views.setCurrentIndex(3)
+                self.refresh_tarifas()
+        except Exception as exc:
+            InfoBar.error(
+                title="Error al Cargar Vista",
+                content=f"Error en consulta de datos: {exc}. Asegúrese de haber ejecutado 'dbconfigurar.bat' y 'dbprogramar.bat'.",
+                parent=self.window(),
+                duration=6000
+            )
 
     # ==========================================================================
     # PESTANA 1: TORNIQUETES Y TARJETA OMNY
@@ -1666,6 +1683,7 @@ class CardsInterface(QWidget):
 
         # Llenar tabla de tarjetas
         self.table_cards.blockSignals(True)
+        self.table_cards.clearContents()
         self.table_cards.setRowCount(len(self.tarjetas_cache))
         for r, row in enumerate(self.tarjetas_cache):
             num = _safe_str(row.get("NUMERO_TARJETA"))
@@ -2114,6 +2132,7 @@ class CardsInterface(QWidget):
     def load_card_sub_histories(self, numero_tarjeta: str):
         # 1. Viajes
         viajes = m5_cards_service.get_historial_viajes(numero_tarjeta=numero_tarjeta)
+        self.table_viajes_tarjeta.clearContents()
         self.table_viajes_tarjeta.setRowCount(len(viajes))
         for r, row in enumerate(viajes):
             self.table_viajes_tarjeta.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_TRANSACCION"))))
@@ -2127,6 +2146,7 @@ class CardsInterface(QWidget):
 
         # 2. Recargas
         recargas = m5_cards_service.get_historial_recargas(numero_tarjeta=numero_tarjeta)
+        self.table_recargas_tarjeta.clearContents()
         self.table_recargas_tarjeta.setRowCount(len(recargas))
         for r, row in enumerate(recargas):
             self.table_recargas_tarjeta.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_TRANSACCION"))))
@@ -2202,7 +2222,7 @@ class CardsInterface(QWidget):
 
         dlg.spin_saldo.setValue(_safe_float(card.get("SALDO_DISPONIBLE")))
         dlg.spin_saldo.setEnabled(False)
-        dlg.txt_fvenc.setText(_safe_str(card.get("FECHA_VENCIMIENTO", "")))
+        dlg.set_fecha_vencimiento(card.get("FECHA_VENCIMIENTO"))
         dlg.yesButton.setText("Guardar Cambios")
 
         if dlg.exec():
@@ -2418,6 +2438,7 @@ class CardsInterface(QWidget):
         self.lbl_pas_tar_title.setText(f"Tarjetas OMNY Asociadas a {pas.get('NOMBRE', '')}")
 
         tarjetas = m5_cards_service.get_tarjetas(pasajero_id=p_id)
+        self.table_pasajero_tarjetas.clearContents()
         self.table_pasajero_tarjetas.setRowCount(len(tarjetas))
         for r, row in enumerate(tarjetas):
             self.table_pasajero_tarjetas.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_TARJETA"))))

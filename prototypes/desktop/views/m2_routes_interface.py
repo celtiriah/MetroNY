@@ -24,12 +24,16 @@ from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
-    SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, FluentIcon as FIF
+    SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, FluentIcon as FIF,
+    CalendarPicker
 )
 
 from services import m2_routes_service
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    to_qdate, qdate_to_iso, create_calendar_picker,
+    to_qtime, qtime_to_str, create_time_picker,
+    RecordCalendarPicker
 )
 
 
@@ -193,13 +197,13 @@ class ParadaRutaDialog(MessageBoxBase):
         self.spin_orden.setValue(sugerir_orden)
         form.addRow("Orden de Llegada:", self.spin_orden)
 
-        self.txt_hora_llegada = LineEdit(self)
-        self.txt_hora_llegada.setPlaceholderText("HH:MM (ej: 07:15)")
-        form.addRow("Hora Estimada Llegada:", self.txt_hora_llegada)
+        h_lleg_init = self.parada_data.get("HORA_LLEGADA") if self.es_edicion and self.parada_data else None
+        self.picker_hora_llegada = create_time_picker(self, initial_time=h_lleg_init, allow_reset=True, show_seconds=False)
+        form.addRow("Hora Estimada Llegada:", self.picker_hora_llegada)
 
-        self.txt_hora_salida = LineEdit(self)
-        self.txt_hora_salida.setPlaceholderText("HH:MM (ej: 07:17)")
-        form.addRow("Hora Estimada Salida:", self.txt_hora_salida)
+        h_sal_init = self.parada_data.get("HORA_SALIDA") if self.es_edicion and self.parada_data else None
+        self.picker_hora_salida = create_time_picker(self, initial_time=h_sal_init, allow_reset=True, show_seconds=False)
+        form.addRow("Hora Estimada Salida:", self.picker_hora_salida)
 
         self.spin_distancia = DoubleSpinBox(self)
         self.spin_distancia.setRange(0.0, 50.0)
@@ -229,8 +233,6 @@ class ParadaRutaDialog(MessageBoxBase):
                         self.combo_estacion.setCurrentIndex(i)
                         break
             self.spin_orden.setValue(_safe_int(self.parada_data.get("ORDEN_LLEGADA", 1), 1))
-            self.txt_hora_llegada.setText(str(self.parada_data.get("HORA_LLEGADA", "") or ""))
-            self.txt_hora_salida.setText(str(self.parada_data.get("HORA_SALIDA", "") or ""))
             self.spin_distancia.setValue(_safe_float(self.parada_data.get("DISTANCIA_DESDE_ANTERIOR_KM", 0.0), 0.0))
             self.spin_tiempo.setValue(_safe_int(self.parada_data.get("TIEMPO_DESDE_ANTERIOR_MIN", 0), 0))
             self.chk_se_detiene.setChecked(self.parada_data.get("SE_DETIENE") == "S")
@@ -240,8 +242,8 @@ class ParadaRutaDialog(MessageBoxBase):
             "ruta_id": self.ruta_id,
             "estacion_id": self.combo_estacion.currentData(),
             "orden_llegada": self.spin_orden.value(),
-            "hora_estimada_llegada": self.txt_hora_llegada.text().strip() or None,
-            "hora_estimada_salida": self.txt_hora_salida.text().strip() or None,
+            "hora_estimada_llegada": qtime_to_str(self.picker_hora_llegada.getTime()),
+            "hora_estimada_salida": qtime_to_str(self.picker_hora_salida.getTime()),
             "distancia_desde_anterior_km": self.spin_distancia.value(),
             "tiempo_desde_anterior_min": self.spin_tiempo.value(),
             "se_detiene": "S" if self.chk_se_detiene.isChecked() else "N"
@@ -269,15 +271,13 @@ class HorarioDialog(MessageBoxBase):
         ])
         form.addRow("Dia de la Semana:", self.combo_dia)
 
-        self.txt_inicio = LineEdit(self)
-        self.txt_inicio.setPlaceholderText("HH:MM (ej: 06:00)")
-        self.txt_inicio.setText("06:00")
-        form.addRow("Hora de Inicio:", self.txt_inicio)
+        h_ini_val = self.horario_data.get("HORA_INICIO", "06:00") if self.es_edicion and self.horario_data else "06:00"
+        self.picker_inicio = create_time_picker(self, initial_time=h_ini_val, allow_reset=False, show_seconds=False)
+        form.addRow("Hora de Inicio:", self.picker_inicio)
 
-        self.txt_fin = LineEdit(self)
-        self.txt_fin.setPlaceholderText("HH:MM (ej: 09:30)")
-        self.txt_fin.setText("09:30")
-        form.addRow("Hora de Finalizacion:", self.txt_fin)
+        h_fin_val = self.horario_data.get("HORA_FIN", "09:30") if self.es_edicion and self.horario_data else "09:30"
+        self.picker_fin = create_time_picker(self, initial_time=h_fin_val, allow_reset=False, show_seconds=False)
+        form.addRow("Hora de Finalizacion:", self.picker_fin)
 
         self.spin_frecuencia = SpinBox(self)
         self.spin_frecuencia.setRange(1, 120)
@@ -297,18 +297,24 @@ class HorarioDialog(MessageBoxBase):
         if self.es_edicion and self.horario_data:
             dia = str(self.horario_data.get("DIA_SEMANA", "Lunes a Viernes"))
             self.combo_dia.setCurrentText(dia)
-            self.txt_inicio.setText(str(self.horario_data.get("HORA_INICIO", "06:00")))
-            self.txt_fin.setText(str(self.horario_data.get("HORA_FIN", "09:30")))
+            qt_ini = to_qtime(self.horario_data.get("HORA_INICIO", "06:00"))
+            if qt_ini is not None:
+                self.picker_inicio.setTime(qt_ini)
+            qt_fin = to_qtime(self.horario_data.get("HORA_FIN", "09:30"))
+            if qt_fin is not None:
+                self.picker_fin.setTime(qt_fin)
             self.spin_frecuencia.setValue(_safe_int(self.horario_data.get("FRECUENCIA_MINUTOS", 5), 5))
             tipo = str(self.horario_data.get("TIPO_SERVICIO", "Valle / Regular"))
             self.combo_tipo.setCurrentText(tipo)
 
     def get_data(self) -> Dict[str, Any]:
+        h_ini = qtime_to_str(self.picker_inicio.getTime()) or "06:00"
+        h_fin = qtime_to_str(self.picker_fin.getTime()) or "09:30"
         return {
             "ruta_id": self.ruta_id,
             "dia_semana": self.combo_dia.currentText(),
-            "hora_inicio": self.txt_inicio.text().strip(),
-            "hora_fin": self.txt_fin.text().strip(),
+            "hora_inicio": h_ini,
+            "hora_fin": h_fin,
             "frecuencia_minutos": self.spin_frecuencia.value(),
             "tipo_servicio": self.combo_tipo.currentText(),
             "fecha_vigencia_desde": date.today().strftime("%Y-%m-%d"),
@@ -341,19 +347,14 @@ class ProgramarViajeDialog(MessageBoxBase):
                     break
         form.addRow("Ruta Programada:", self.combo_ruta)
 
-        self.txt_fecha = LineEdit(self)
-        self.txt_fecha.setText(date.today().strftime("%Y-%m-%d"))
-        form.addRow("Fecha del Viaje:", self.txt_fecha)
+        self.picker_fecha = create_calendar_picker(self, initial_date=date.today())
+        form.addRow("Fecha del Viaje:", self.picker_fecha)
 
-        self.txt_salida = LineEdit(self)
-        self.txt_salida.setPlaceholderText("HH:MM (ej: 08:00)")
-        self.txt_salida.setText("08:00")
-        form.addRow("Hora Programada Salida:", self.txt_salida)
+        self.picker_salida = create_time_picker(self, initial_time="08:00", allow_reset=False, show_seconds=False)
+        form.addRow("Hora Programada Salida:", self.picker_salida)
 
-        self.txt_llegada = LineEdit(self)
-        self.txt_llegada.setPlaceholderText("HH:MM (ej: 08:45)")
-        self.txt_llegada.setText("08:45")
-        form.addRow("Hora Programada Llegada:", self.txt_llegada)
+        self.picker_llegada = create_time_picker(self, initial_time="08:45", allow_reset=False, show_seconds=False)
+        form.addRow("Hora Programada Llegada:", self.picker_llegada)
 
         self.combo_tren = ComboBox(self)
         self.trenes = m2_routes_service.get_trenes_disponibles_combo()
@@ -387,40 +388,38 @@ class ProgramarViajeDialog(MessageBoxBase):
 
     def validate(self) -> bool:
         """Valida que la fecha y horarios del despacho sean coherentes."""
-        fecha_str = self.txt_fecha.text().strip()
-        salida_str = self.txt_salida.text().strip()
-        llegada_str = self.txt_llegada.text().strip()
+        qdate = self.picker_fecha.getDate()
+        t_sal = self.picker_salida.getTime()
+        t_lleg = self.picker_llegada.getTime()
 
-        if not fecha_str:
-            self.lbl_error.setText("La fecha del viaje es obligatoria (YYYY-MM-DD).")
+        if not qdate.isValid():
+            self.lbl_error.setText("La fecha del viaje es obligatoria.")
             self.lbl_error.show()
-            self.txt_fecha.setFocus()
+            self.picker_fecha.setFocus()
             return False
 
-        try:
-            f_dt = datetime.strptime(fecha_str, "%Y-%m-%d").date()
-            if f_dt < date(2020, 1, 1):
-                self.lbl_error.setText("Fecha inválida: No se permite programar viajes en el pasado remoto (< 2020).")
-                self.lbl_error.show()
-                self.txt_fecha.setFocus()
-                return False
-        except ValueError:
-            self.lbl_error.setText("Formato de fecha inválido. Utilice el estándar YYYY-MM-DD.")
+        if qdate.year() < 2020:
+            self.lbl_error.setText("Fecha inválida: No se permite programar viajes en el pasado remoto (< 2020).")
             self.lbl_error.show()
-            self.txt_fecha.setFocus()
+            self.picker_fecha.setFocus()
             return False
 
-        try:
-            t_sal = datetime.strptime(salida_str, "%H:%M").time()
-            t_lleg = datetime.strptime(llegada_str, "%H:%M").time()
-            if t_lleg <= t_sal:
-                self.lbl_error.setText("La hora de llegada programada debe ser posterior a la hora de salida.")
-                self.lbl_error.show()
-                self.txt_llegada.setFocus()
-                return False
-        except ValueError:
-            self.lbl_error.setText("Formato de hora inválido. Utilice el formato HH:MM (ej: 08:30).")
+        if not t_sal.isValid():
+            self.lbl_error.setText("La hora programada de salida es obligatoria.")
             self.lbl_error.show()
+            self.picker_salida.setFocus()
+            return False
+
+        if not t_lleg.isValid():
+            self.lbl_error.setText("La hora programada de llegada es obligatoria.")
+            self.lbl_error.show()
+            self.picker_llegada.setFocus()
+            return False
+
+        if t_lleg <= t_sal:
+            self.lbl_error.setText("La hora de llegada programada debe ser posterior a la hora de salida.")
+            self.lbl_error.show()
+            self.picker_llegada.setFocus()
             return False
 
         if not self.combo_tren.currentData():
@@ -439,9 +438,9 @@ class ProgramarViajeDialog(MessageBoxBase):
     def get_data(self) -> Dict[str, Any]:
         return {
             "ruta_id": self.combo_ruta.currentData(),
-            "fecha": self.txt_fecha.text().strip(),
-            "hora_salida": self.txt_salida.text().strip(),
-            "hora_llegada": self.txt_llegada.text().strip(),
+            "fecha": qdate_to_iso(self.picker_fecha.getDate()),
+            "hora_salida": qtime_to_str(self.picker_salida.getTime()) or "08:00",
+            "hora_llegada": qtime_to_str(self.picker_llegada.getTime()) or "08:45",
             "tren_id": self.combo_tren.currentData(),
             "conductor_id": self.combo_conductor.currentData(),
             "estado": self.combo_estado.currentText(),
@@ -466,19 +465,16 @@ class EditarViajeDialog(MessageBoxBase):
         lbl_info = StrongBodyLabel(f"Viaje: {num_viaje} - Ruta: {cod_ruta}", self)
         form.addRow("Identificación:", lbl_info)
 
-        self.txt_fecha = LineEdit(self)
-        self.txt_fecha.setText(str(self.viaje_data.get("FECHA", date.today().strftime("%Y-%m-%d"))))
-        form.addRow("Fecha del Viaje:", self.txt_fecha)
+        self.picker_fecha = create_calendar_picker(self, initial_date=self.viaje_data.get("FECHA", date.today()))
+        form.addRow("Fecha del Viaje:", self.picker_fecha)
 
-        self.txt_salida = LineEdit(self)
-        self.txt_salida.setPlaceholderText("HH:MM (ej: 08:00)")
-        self.txt_salida.setText(str(self.viaje_data.get("HORA_PROG_SALIDA", "08:00")))
-        form.addRow("Hora Programada Salida:", self.txt_salida)
+        h_sal_init = self.viaje_data.get("HORA_PROG_SALIDA", "08:00")
+        self.picker_salida = create_time_picker(self, initial_time=h_sal_init, allow_reset=False, show_seconds=False)
+        form.addRow("Hora Programada Salida:", self.picker_salida)
 
-        self.txt_llegada = LineEdit(self)
-        self.txt_llegada.setPlaceholderText("HH:MM (ej: 08:45)")
-        self.txt_llegada.setText(str(self.viaje_data.get("HORA_PROG_LLEGADA", "08:45")))
-        form.addRow("Hora Programada Llegada:", self.txt_llegada)
+        h_lleg_init = self.viaje_data.get("HORA_PROG_LLEGADA", "08:45")
+        self.picker_llegada = create_time_picker(self, initial_time=h_lleg_init, allow_reset=False, show_seconds=False)
+        form.addRow("Hora Programada Llegada:", self.picker_llegada)
 
         self.combo_tren = ComboBox(self)
         self.trenes = m2_routes_service.get_todos_trenes_combo()
@@ -529,40 +525,38 @@ class EditarViajeDialog(MessageBoxBase):
 
     def validate(self) -> bool:
         """Valida que la fecha y horarios del viaje reprogramado sean válidos."""
-        fecha_str = self.txt_fecha.text().strip()
-        salida_str = self.txt_salida.text().strip()
-        llegada_str = self.txt_llegada.text().strip()
+        qdate = self.picker_fecha.getDate()
+        t_sal = self.picker_salida.getTime()
+        t_lleg = self.picker_llegada.getTime()
 
-        if not fecha_str:
-            self.lbl_error.setText("La fecha del viaje es obligatoria (formato YYYY-MM-DD).")
+        if not qdate.isValid():
+            self.lbl_error.setText("La fecha del viaje es obligatoria.")
             self.lbl_error.show()
-            self.txt_fecha.setFocus()
+            self.picker_fecha.setFocus()
             return False
 
-        try:
-            f_dt = datetime.strptime(fecha_str, "%Y-%m-%d").date()
-            if f_dt < date(2020, 1, 1):
-                self.lbl_error.setText("Fecha inválida: No se permite reprogramar a fechas en el pasado remoto.")
-                self.lbl_error.show()
-                self.txt_fecha.setFocus()
-                return False
-        except ValueError:
-            self.lbl_error.setText("Formato de fecha inválido. Utilice el estándar YYYY-MM-DD.")
+        if qdate.year() < 2020:
+            self.lbl_error.setText("Fecha inválida: No se permite reprogramar a fechas en el pasado remoto.")
             self.lbl_error.show()
-            self.txt_fecha.setFocus()
+            self.picker_fecha.setFocus()
             return False
 
-        try:
-            t_sal = datetime.strptime(salida_str, "%H:%M").time()
-            t_lleg = datetime.strptime(llegada_str, "%H:%M").time()
-            if t_lleg <= t_sal:
-                self.lbl_error.setText("La hora de llegada programada debe ser posterior a la hora de salida.")
-                self.lbl_error.show()
-                self.txt_llegada.setFocus()
-                return False
-        except ValueError:
-            self.lbl_error.setText("Formato de hora inválido. Utilice HH:MM (ej: 09:15).")
+        if not t_sal.isValid():
+            self.lbl_error.setText("La hora programada de salida es obligatoria.")
             self.lbl_error.show()
+            self.picker_salida.setFocus()
+            return False
+
+        if not t_lleg.isValid():
+            self.lbl_error.setText("La hora programada de llegada es obligatoria.")
+            self.lbl_error.show()
+            self.picker_llegada.setFocus()
+            return False
+
+        if t_lleg <= t_sal:
+            self.lbl_error.setText("La hora de llegada programada debe ser posterior a la hora de salida.")
+            self.lbl_error.show()
+            self.picker_llegada.setFocus()
             return False
 
         self.lbl_error.hide()
@@ -570,9 +564,9 @@ class EditarViajeDialog(MessageBoxBase):
 
     def get_data(self) -> Dict[str, Any]:
         return {
-            "fecha": self.txt_fecha.text().strip(),
-            "hora_salida": self.txt_salida.text().strip(),
-            "hora_llegada": self.txt_llegada.text().strip(),
+            "fecha": qdate_to_iso(self.picker_fecha.getDate()),
+            "hora_salida": qtime_to_str(self.picker_salida.getTime()) or "08:00",
+            "hora_llegada": qtime_to_str(self.picker_llegada.getTime()) or "08:45",
             "tren_id": self.combo_tren.currentData(),
             "conductor_id": self.combo_conductor.currentData(),
             "estado": self.combo_estado.currentText(),
@@ -802,11 +796,10 @@ class M2RoutesInterface(QWidget):
         bar_v = QHBoxLayout()
         bar_v.setSpacing(10)
 
-        bar_v.addWidget(CaptionLabel("Fecha:", tab_widget))
-        self.txt_filtro_fecha = LineEdit(tab_widget)
-        self.txt_filtro_fecha.setPlaceholderText("YYYY-MM-DD")
-        self.txt_filtro_fecha.textChanged.connect(self.refresh_viajes)
-        bar_v.addWidget(self.txt_filtro_fecha, stretch=2)
+        bar_v.addWidget(CaptionLabel("Fecha del Viaje:", tab_widget))
+        self.picker_filtro_fecha = RecordCalendarPicker(tab_widget, placeholder_text="Todas las fechas")
+        self.picker_filtro_fecha.dateChanged.connect(self.refresh_viajes)
+        bar_v.addWidget(self.picker_filtro_fecha, stretch=2)
 
         bar_v.addWidget(CaptionLabel("Estado:", tab_widget))
         self.combo_filtro_estado_viaje = ComboBox(tab_widget)
@@ -1276,7 +1269,11 @@ class M2RoutesInterface(QWidget):
     # --------------------------------------------------------------------------
 
     def refresh_viajes(self):
-        fecha = self.txt_filtro_fecha.text().strip() or None
+        fechas_disp = m2_routes_service.get_fechas_viajes_registrados()
+        self.picker_filtro_fecha.set_available_dates(fechas_disp)
+
+        qd = self.picker_filtro_fecha.getDate()
+        fecha = qdate_to_iso(qd) if qd.isValid() else None
         estado = self.combo_filtro_estado_viaje.currentText()
         viajes = m2_routes_service.get_viajes_programados(fecha=fecha, estado=estado)
         self.table_viajes.setRowCount(0)
@@ -1396,11 +1393,11 @@ class M2RoutesInterface(QWidget):
 
                 # Ajustar filtros si la nueva fecha o estado quedarían ocultos por los filtros actuales
                 nueva_fecha = datos.get("fecha", "")
-                curr_fecha = self.txt_filtro_fecha.text().strip()
-                if curr_fecha and curr_fecha != nueva_fecha:
-                    self.txt_filtro_fecha.blockSignals(True)
-                    self.txt_filtro_fecha.setText(nueva_fecha)
-                    self.txt_filtro_fecha.blockSignals(False)
+                qd_nueva = to_qdate(nueva_fecha)
+                if qd_nueva is not None and self.picker_filtro_fecha.getDate().isValid():
+                    self.picker_filtro_fecha.blockSignals(True)
+                    self.picker_filtro_fecha.setDate(qd_nueva)
+                    self.picker_filtro_fecha.blockSignals(False)
 
                 nuevo_estado = datos.get("estado", "")
                 curr_estado = self.combo_filtro_estado_viaje.currentText()

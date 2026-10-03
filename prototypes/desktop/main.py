@@ -24,6 +24,8 @@ def main():
 
     # 2. Launch Application Event Loop
     app = QApplication(sys.argv)
+    from views.components.date_utils import ensure_spanish_translator
+    ensure_spanish_translator()
     window = MetroFluentApp()
     window.show()
     sys.exit(app.exec_())

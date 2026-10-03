@@ -15,7 +15,7 @@ import re
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
@@ -27,12 +27,13 @@ from qfluentwidgets import (
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
     SegmentedWidget, MessageBoxBase, MessageBox, IconWidget,
-    FluentIcon as FIF
+    FluentIcon as FIF, CalendarPicker, TimePicker
 )
 
 from services import m6_maintenance_service
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    to_qdate, qdate_to_iso, create_calendar_picker, create_time_picker
 )
 
 
@@ -183,9 +184,14 @@ class CompletarOrdenDialog(MessageBoxBase):
         form.addRow("Costo Final Auditado ($):", self.spin_costo)
 
         # Fecha de finalizacion
-        self.txt_fecha_fin = LineEdit(self)
-        self.txt_fecha_fin.setText(datetime.now().strftime("%Y-%m-%d %H:%M"))
-        form.addRow("Fecha / Hora Cierre:", self.txt_fecha_fin)
+        self.picker_fecha_fin = create_calendar_picker(self, initial_date=date.today(), allow_reset=False)
+        self.picker_hora_fin = create_time_picker(self, initial_time=datetime.now(), allow_reset=False, show_seconds=False)
+        dt_layout = QHBoxLayout()
+        dt_layout.setContentsMargins(0, 0, 0, 0)
+        dt_layout.setSpacing(8)
+        dt_layout.addWidget(self.picker_fecha_fin)
+        dt_layout.addWidget(self.picker_hora_fin)
+        form.addRow("Fecha / Hora Cierre:", dt_layout)
 
         # Proxima revision en dias
         self.spin_dias = SpinBox(self)
@@ -213,26 +219,23 @@ class CompletarOrdenDialog(MessageBoxBase):
         self.yesButton.clicked.disconnect()
         self.yesButton.clicked.connect(self._on_confirm)
 
+    def get_fecha_fin(self) -> str:
+        qdate = self.picker_fecha_fin.getDate()
+        qtime = self.picker_hora_fin.getTime()
+        d_str = qdate.toString(Qt.DateFormat.ISODate) if qdate.isValid() else date.today().strftime("%Y-%m-%d")
+        t_str = qtime.toString("hh:mm") if qtime.isValid() else "12:00"
+        return f"{d_str} {t_str}"
+
     def validate(self) -> bool:
         if self.spin_costo.value() < 0:
             self.lbl_error.setText("El costo final auditado no puede ser negativo.")
             self.lbl_error.show()
             return False
-        ffin = self.txt_fecha_fin.text().strip()
-        if ffin:
-            valida = False
-            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-                try:
-                    datetime.strptime(ffin, fmt)
-                    valida = True
-                    break
-                except ValueError:
-                    pass
-            if not valida:
-                self.lbl_error.setText("Formato de fecha inválido (use AAAA-MM-DD HH:MM).")
-                self.lbl_error.show()
-                self.txt_fecha_fin.setFocus()
-                return False
+        if not self.picker_fecha_fin.getDate().isValid():
+            self.lbl_error.setText("La fecha de cierre es obligatoria.")
+            self.lbl_error.show()
+            self.picker_fecha_fin.setFocus()
+            return False
         self.lbl_error.hide()
         return True
 
@@ -348,11 +351,9 @@ class EquipoDialog(MessageBoxBase):
         form.addRow("Estado Operativo:", self.combo_estado)
 
         # 8. Fechas
-        self.txt_fecha_prox = LineEdit(self)
-        self.txt_fecha_prox.setPlaceholderText("YYYY-MM-DD")
-        if self.equipo and self.equipo.get("FECHA_PROXIMA_REVISION") != "-":
-            self.txt_fecha_prox.setText(_safe_str(self.equipo.get("FECHA_PROXIMA_REVISION")))
-        form.addRow("Próxima Revisión:", self.txt_fecha_prox)
+        fprox_val = self.equipo.get("FECHA_PROXIMA_REVISION") if self.equipo else None
+        self.picker_fecha_prox = create_calendar_picker(self, initial_date=fprox_val, allow_reset=True)
+        form.addRow("Próxima Revisión:", self.picker_fecha_prox)
 
         # Label de error
         self.lbl_error = CaptionLabel("", self)
@@ -368,21 +369,15 @@ class EquipoDialog(MessageBoxBase):
         self.yesButton.clicked.disconnect()
         self.yesButton.clicked.connect(self._on_confirm)
 
+    def get_fecha_proxima_revision(self) -> Optional[str]:
+        return qdate_to_iso(self.picker_fecha_prox.getDate())
+
     def validate(self) -> bool:
         if not self.txt_codigo.text().strip():
             self.lbl_error.setText("El código de equipo es obligatorio.")
             self.lbl_error.show()
             self.txt_codigo.setFocus()
             return False
-        fprox = self.txt_fecha_prox.text().strip()
-        if fprox:
-            try:
-                datetime.strptime(fprox, "%Y-%m-%d")
-            except ValueError:
-                self.lbl_error.setText("Formato de fecha inválido (use AAAA-MM-DD).")
-                self.lbl_error.show()
-                self.txt_fecha_prox.setFocus()
-                return False
         self.lbl_error.hide()
         return True
 
@@ -714,21 +709,29 @@ class MaintenanceInterface(QWidget):
             self.segmented_tabs.setCurrentItem("tab_ordenes")
 
     def on_tab_changed(self, key: str):
-        if key == "tab_ordenes":
-            self.stack_views.setCurrentIndex(0)
-            self.refresh_ordenes()
-        elif key == "tab_equipos":
-            self.stack_views.setCurrentIndex(1)
-            self.refresh_equipos()
-        elif key == "tab_cuadrillas":
-            self.stack_views.setCurrentIndex(2)
-            self.refresh_cuadrillas()
-        elif key == "tab_repuestos":
-            self.stack_views.setCurrentIndex(3)
-            self.refresh_repuestos()
-        else:
-            self.stack_views.setCurrentIndex(4)
-            self.refresh_alertas()
+        try:
+            if key == "tab_ordenes":
+                self.stack_views.setCurrentIndex(0)
+                self.refresh_ordenes()
+            elif key == "tab_equipos":
+                self.stack_views.setCurrentIndex(1)
+                self.refresh_equipos()
+            elif key == "tab_cuadrillas":
+                self.stack_views.setCurrentIndex(2)
+                self.refresh_cuadrillas()
+            elif key == "tab_repuestos":
+                self.stack_views.setCurrentIndex(3)
+                self.refresh_repuestos()
+            else:
+                self.stack_views.setCurrentIndex(4)
+                self.refresh_alertas()
+        except Exception as exc:
+            InfoBar.error(
+                title="Error al Cargar Vista",
+                content=f"Error en consulta de mantenimiento: {exc}. Verifique ejecutar 'dbconfigurar.bat' y 'dbprogramar.bat'.",
+                parent=self.window(),
+                duration=6000
+            )
 
     # ==========================================================================
     # PESTANA 1: ORDENES DE MANTENIMIENTO
@@ -961,7 +964,7 @@ class MaintenanceInterface(QWidget):
         dialog = CompletarOrdenDialog(orden, self.window())
         if dialog.exec():
             costo = dialog.spin_costo.value()
-            f_fin = dialog.txt_fecha_fin.text().strip()
+            f_fin = dialog.get_fecha_fin()
             dias = dialog.spin_dias.value()
 
             res = m6_maintenance_service.completar_orden(
@@ -1120,7 +1123,7 @@ class MaintenanceInterface(QWidget):
                 modelo=dialog.txt_modelo.text(),
                 numero_serie=dialog.txt_serie.text(),
                 estado=dialog.combo_estado.currentText(),
-                fecha_proxima_revision=dialog.txt_fecha_prox.text() if dialog.txt_fecha_prox.text().strip() else None
+                fecha_proxima_revision=dialog.get_fecha_proxima_revision()
             )
 
             if res.get("success"):
@@ -1155,7 +1158,7 @@ class MaintenanceInterface(QWidget):
                 modelo=dialog.txt_modelo.text(),
                 numero_serie=dialog.txt_serie.text(),
                 estado=dialog.combo_estado.currentText(),
-                fecha_proxima_revision=dialog.txt_fecha_prox.text() if dialog.txt_fecha_prox.text().strip() else None
+                fecha_proxima_revision=dialog.get_fecha_proxima_revision()
             )
 
             if res.get("success"):
@@ -1487,6 +1490,7 @@ class MaintenanceInterface(QWidget):
         self.repuestos_cache = m6_maintenance_service.get_catalogo_repuestos(st if st else None)
 
         self.table_catalogo_repuestos.blockSignals(True)
+        self.table_catalogo_repuestos.clearContents()
         self.table_catalogo_repuestos.setRowCount(len(self.repuestos_cache))
         for r, row in enumerate(self.repuestos_cache):
             cod = _safe_str(row.get("CODIGO"))
@@ -1527,12 +1531,14 @@ class MaintenanceInterface(QWidget):
     def on_rep_orden_changed(self):
         id_ord = self.combo_rep_orden.currentData()
         if not id_ord:
+            self.table_orden_repuestos.clearContents()
             self.table_orden_repuestos.setRowCount(0)
             self.lbl_costo_orden_consolidado.setText("Costo Total Consolidado: $0.00")
             return
 
         repuestos = m6_maintenance_service.get_repuestos_por_orden(int(id_ord))
         self.table_orden_repuestos.blockSignals(True)
+        self.table_orden_repuestos.clearContents()
         self.table_orden_repuestos.setRowCount(len(repuestos))
         for r, row in enumerate(repuestos):
             cod = _safe_str(row.get("CODIGO_REPUESTO"))

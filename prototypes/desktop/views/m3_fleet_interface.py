@@ -23,12 +23,14 @@ from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
     PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
-    SegmentedWidget, MessageBoxBase, MessageBox, FluentIcon as FIF
+    SegmentedWidget, MessageBoxBase, MessageBox, FluentIcon as FIF,
+    CalendarPicker
 )
 
 from services import m3_fleet_service, actions_service
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    to_qdate, qdate_to_iso, create_calendar_picker
 )
 
 
@@ -129,19 +131,13 @@ class TrenDialog(MessageBoxBase):
         form.addRow("Kilometraje:", self.spin_km)
 
         # 6. Fechas de Inspección Técnica
-        self.txt_ult_insp = LineEdit(self)
-        self.txt_ult_insp.setPlaceholderText("YYYY-MM-DD")
-        ult_insp_str = _safe_str(self.tren_data.get("FECHA_ULTIMA_INSPECCION", "")) if self.es_edicion and self.tren_data else ""
-        if ult_insp_str != "-":
-            self.txt_ult_insp.setText(ult_insp_str)
-        form.addRow("Última Inspección:", self.txt_ult_insp)
+        ult_insp_val = self.tren_data.get("FECHA_ULTIMA_INSPECCION") if self.es_edicion and self.tren_data else None
+        self.picker_ult_insp = create_calendar_picker(self, initial_date=ult_insp_val, allow_reset=True)
+        form.addRow("Última Inspección:", self.picker_ult_insp)
 
-        self.txt_prox_insp = LineEdit(self)
-        self.txt_prox_insp.setPlaceholderText("YYYY-MM-DD")
-        prox_insp_str = _safe_str(self.tren_data.get("FECHA_PROXIMA_INSPECCION", "")) if self.es_edicion and self.tren_data else ""
-        if prox_insp_str != "-":
-            self.txt_prox_insp.setText(prox_insp_str)
-        form.addRow("Próxima Inspección:", self.txt_prox_insp)
+        prox_insp_val = self.tren_data.get("FECHA_PROXIMA_INSPECCION") if self.es_edicion and self.tren_data else None
+        self.picker_prox_insp = create_calendar_picker(self, initial_date=prox_insp_val, allow_reset=True)
+        form.addRow("Próxima Inspección:", self.picker_prox_insp)
 
         # 7. Estado Operativo (solo al crear)
         if not self.es_edicion:
@@ -213,33 +209,13 @@ class TrenDialog(MessageBoxBase):
                 self.spin_km.setFocus()
                 return False
 
-        f_ult_str = self.txt_ult_insp.text().strip()
-        f_prox_str = self.txt_prox_insp.text().strip()
-        d_ult: Optional[date] = None
-        d_prox: Optional[date] = None
+        d_ult = self.picker_ult_insp.getDate()
+        d_prox = self.picker_prox_insp.getDate()
 
-        if f_ult_str:
-            try:
-                d_ult = datetime.strptime(f_ult_str, "%Y-%m-%d").date()
-            except ValueError:
-                self.lbl_error.setText("Formato inválido en Última Inspección. Use YYYY-MM-DD.")
-                self.lbl_error.show()
-                self.txt_ult_insp.setFocus()
-                return False
-
-        if f_prox_str:
-            try:
-                d_prox = datetime.strptime(f_prox_str, "%Y-%m-%d").date()
-            except ValueError:
-                self.lbl_error.setText("Formato inválido en Próxima Inspección. Use YYYY-MM-DD.")
-                self.lbl_error.show()
-                self.txt_prox_insp.setFocus()
-                return False
-
-        if d_ult and d_prox and d_prox < d_ult:
+        if d_ult.isValid() and d_prox.isValid() and d_prox < d_ult:
             self.lbl_error.setText("La fecha de próxima inspección no puede ser anterior a la última inspección.")
             self.lbl_error.show()
-            self.txt_prox_insp.setFocus()
+            self.picker_prox_insp.setFocus()
             return False
 
         self.lbl_error.hide()
@@ -252,8 +228,8 @@ class TrenDialog(MessageBoxBase):
             "anio_fabricacion": self.spin_anio.value(),
             "deposito_id": self.combo_deposito.currentData(),
             "kilometraje_acumulado": self.spin_km.value(),
-            "fecha_ultima_inspeccion": self.txt_ult_insp.text().strip() or None,
-            "fecha_proxima_inspeccion": self.txt_prox_insp.text().strip() or None,
+            "fecha_ultima_inspeccion": qdate_to_iso(self.picker_ult_insp.getDate()),
+            "fecha_proxima_inspeccion": qdate_to_iso(self.picker_prox_insp.getDate()),
         }
         if not self.es_edicion and hasattr(self, "combo_estado"):
             data["estado_operativo"] = self.combo_estado.currentText()
@@ -522,13 +498,6 @@ class AsignarTrenViajeDialog(MessageBoxBase):
         self.titleLabel = SubtitleLabel(f"Asignar Tren a Viaje {num_viaje}", self)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.setSpacing(10)
-
-        self.viewLayout.addWidget(CaptionLabel(
-            "Reglas de Negocio Validadas:\n"
-            "- Regla 11: Trenes en mantenimiento o fuera de servicio no pueden asignarse.\n"
-            "- Regla 8: Un tren no puede estar asignado a dos viajes simultáneos.",
-            self
-        ))
 
         form = QFormLayout()
         form.setSpacing(8)
