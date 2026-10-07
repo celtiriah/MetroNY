@@ -17,23 +17,25 @@ from typing import Optional, List, Dict, Any
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
-    QHeaderView, QFormLayout, QTableWidgetItem
+    QHeaderView, QFormLayout, QTableWidgetItem, QApplication
 )
 
 from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
     CardWidget, ComboBox, LineEdit, SearchLineEdit, DoubleSpinBox, SpinBox,
-    PrimaryPushButton, PushButton, TableWidget, InfoBar, InfoBarPosition,
-    SegmentedWidget, CheckBox, MessageBoxBase, MessageBox, FluentIcon as FIF,
-    CalendarPicker
+    PrimaryPushButton, PushButton, TableWidget, ToolButton, IndeterminateProgressBar,
+    InfoBar, InfoBarPosition, SegmentedWidget, CheckBox, MessageBoxBase, MessageBox,
+    FluentIcon as FIF, CalendarPicker
 )
 
 from services import m2_routes_service
+from workers.viajes_worker import ViajesLoaderWorker
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
     StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
     to_qdate, qdate_to_iso, create_calendar_picker,
     to_qtime, qtime_to_str, create_time_picker,
-    RecordCalendarPicker
+    RecordCalendarPicker, TablePaginationBar
 )
 
 
@@ -591,8 +593,40 @@ class M2RoutesInterface(QWidget):
         self.selected_line_filter_id: Optional[int] = None
         self.rutas_cache: List[Dict[str, Any]] = []
 
+        # Estado de Paginación y Carga Asíncrona de Viajes
+        self.all_viajes: List[Dict[str, Any]] = []
+        self.current_viajes_page: int = 0
+        self.page_size_viajes: int = 50
+        self.highlight_viaje_id: Optional[int] = None
+        self.viajes_worker: Optional[ViajesLoaderWorker] = None
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
         self.init_ui()
-        self.load_all_data()
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -701,6 +735,10 @@ class M2RoutesInterface(QWidget):
         self.table_rutas.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_rutas.itemSelectionChanged.connect(self.on_ruta_selected)
         v_layout.addWidget(self.table_rutas, stretch=4)
+
+        self.pagination_rutas = TablePaginationBar(tab_widget, default_page_size=25, item_label="rutas")
+        self.pagination_rutas.page_changed.connect(self._render_rutas_page)
+        v_layout.addWidget(self.pagination_rutas)
 
         # Panel Inferior: Secuencia de Paradas de la Ruta Seleccionada (RUTA_DETALLE)
         card_paradas = CardWidget(tab_widget)
@@ -825,6 +863,12 @@ class M2RoutesInterface(QWidget):
 
         v_layout.addLayout(bar_v)
 
+        # Barra de progreso indeterminada durante la consulta en segundo plano
+        self.progress_viajes = IndeterminateProgressBar(tab_widget)
+        self.progress_viajes.setFixedHeight(4)
+        self.progress_viajes.hide()
+        v_layout.addWidget(self.progress_viajes)
+
         self.table_viajes = TableWidget(tab_widget)
         self.table_viajes.setBorderVisible(True)
         self.table_viajes.setColumnCount(10)
@@ -835,6 +879,40 @@ class M2RoutesInterface(QWidget):
         self.table_viajes.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_viajes.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_viajes)
+
+        # Barra inferior de paginación variable y contador de registros
+        pagination_row = QHBoxLayout()
+        pagination_row.setSpacing(10)
+
+        self.lbl_pagination_viajes = CaptionLabel(
+            "Cargando viajes programados...", tab_widget
+        )
+        pagination_row.addWidget(self.lbl_pagination_viajes)
+        pagination_row.addStretch(1)
+
+        pagination_row.addWidget(CaptionLabel("Mostrar:", tab_widget))
+        self.combo_page_size_viajes = ComboBox(tab_widget)
+        self.combo_page_size_viajes.addItem("25 filas / pág", userData=25)
+        self.combo_page_size_viajes.addItem("50 filas / pág", userData=50)
+        self.combo_page_size_viajes.addItem("100 filas / pág", userData=100)
+        self.combo_page_size_viajes.addItem("250 filas / pág", userData=250)
+        self.combo_page_size_viajes.setCurrentIndex(1)  # Default: 50
+        self.combo_page_size_viajes.currentIndexChanged.connect(self.on_viajes_page_size_changed)
+        pagination_row.addWidget(self.combo_page_size_viajes)
+
+        self.btn_prev_viajes = ToolButton(FIF.PAGE_LEFT, tab_widget)
+        self.btn_prev_viajes.setToolTip("Página Anterior")
+        self.btn_prev_viajes.setEnabled(False)
+        self.btn_prev_viajes.clicked.connect(self.prev_viajes_page)
+        pagination_row.addWidget(self.btn_prev_viajes)
+
+        self.btn_next_viajes = ToolButton(FIF.PAGE_RIGHT, tab_widget)
+        self.btn_next_viajes.setToolTip("Página Siguiente")
+        self.btn_next_viajes.setEnabled(False)
+        self.btn_next_viajes.clicked.connect(self.next_viajes_page)
+        pagination_row.addWidget(self.btn_next_viajes)
+
+        v_layout.addLayout(pagination_row)
 
         self.stack_views.addWidget(tab_widget)
 
@@ -943,24 +1021,42 @@ class M2RoutesInterface(QWidget):
 
     def refresh_rutas(self):
         linea_id = self.combo_filtro_linea.currentData()
-        self.rutas_cache = m2_routes_service.get_rutas(linea_id)
-        self.apply_rutas_filter()
+        self.pagination_rutas.set_loading(True)
+
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_rutas.set_loading(False)
+            self.rutas_cache = data
+            self.apply_rutas_filter()
+
+        def _on_error(err_msg: str):
+            self.pagination_rutas.set_loading(False)
+            InfoBar.error("Error al Cargar Rutas", err_msg, parent=self, duration=4000)
+
+        self.run_async_fetch(
+            "rutas",
+            m2_routes_service.get_rutas,
+            _on_success,
+            _on_error,
+            linea_id
+        )
 
     def apply_rutas_filter(self):
         query = self.search_rutas.text().strip().lower()
-        self.table_rutas.setRowCount(0)
+        filtered = self.rutas_cache
+        if query:
+            filtered = [
+                r for r in filtered
+                if query in str(r.get("CODIGO", "")).lower() or
+                   query in str(r.get("ORIGEN", "")).lower() or
+                   query in str(r.get("DESTINO", "")).lower()
+            ]
 
-        for r in self.rutas_cache:
-            cod = str(r.get("CODIGO", "")).lower()
-            orig = str(r.get("ORIGEN", "")).lower()
-            dest = str(r.get("DESTINO", "")).lower()
+        page_items = self.pagination_rutas.set_data(filtered, reset_page=True)
+        self._render_rutas_page(page_items)
 
-            if query and query not in cod and query not in orig and query not in dest:
-                continue
-
-            row = self.table_rutas.rowCount()
-            self.table_rutas.insertRow(row)
-
+    def _render_rutas_page(self, page_items: List[Dict[str, Any]]):
+        self.table_rutas.setRowCount(len(page_items))
+        for row, r in enumerate(page_items):
             self.table_rutas.setItem(row, 0, QTableWidgetItem(str(r.get("CODIGO", ""))))
 
             linea_cod = str(r.get("CODIGO_LINEA", ""))
@@ -987,8 +1083,11 @@ class M2RoutesInterface(QWidget):
 
         auto_fit_table_columns(self.table_rutas)
 
-        if self.table_rutas.rowCount() > 0:
+        if page_items and self.table_rutas.rowCount() > 0:
             self.table_rutas.selectRow(0)
+        else:
+            self.table_paradas.setRowCount(0)
+            self.lbl_paradas_title.setText("Secuencia de Paradas (Ninguna ruta seleccionada)")
 
     def on_ruta_selected(self):
         selected_rows = self.table_rutas.selectedItems()
@@ -1269,46 +1368,156 @@ class M2RoutesInterface(QWidget):
     # --------------------------------------------------------------------------
 
     def refresh_viajes(self):
-        fechas_disp = m2_routes_service.get_fechas_viajes_registrados()
-        self.picker_filtro_fecha.set_available_dates(fechas_disp)
+        if self.viajes_worker is not None and self.viajes_worker.isRunning():
+            self.viajes_worker.blockSignals(True)
+            self.viajes_worker = None
 
         qd = self.picker_filtro_fecha.getDate()
         fecha = qdate_to_iso(qd) if qd.isValid() else None
         estado = self.combo_filtro_estado_viaje.currentText()
-        viajes = m2_routes_service.get_viajes_programados(fecha=fecha, estado=estado)
+
+        self.progress_viajes.show()
+        self.btn_prev_viajes.setEnabled(False)
+        self.btn_next_viajes.setEnabled(False)
+        self.lbl_pagination_viajes.setText("Consultando viajes en segundo plano...")
+
+        worker = ViajesLoaderWorker(fecha=fecha, estado=estado, parent=self)
+        self.viajes_worker = worker
+        worker.data_loaded.connect(self.on_viajes_loaded)
+        worker.error_occurred.connect(self.on_viajes_error)
+        worker.finished.connect(self.on_viajes_worker_finished)
+        worker.start()
+
+    def on_viajes_worker_finished(self):
+        self.progress_viajes.hide()
+
+    def on_viajes_loaded(self, viajes: list, fechas_disp: list):
+        self.progress_viajes.hide()
+
+        self.picker_filtro_fecha.blockSignals(True)
+        self.picker_filtro_fecha.set_available_dates(fechas_disp)
+        self.picker_filtro_fecha.blockSignals(False)
+
+        self.all_viajes = list(viajes)
+
+        # Si hay un viaje especificado para resaltar, calcular su pagina
+        if self.highlight_viaje_id is not None:
+            found = False
+            for idx, v in enumerate(self.all_viajes):
+                if _safe_int(v.get("ID_VIAJE", 0)) == self.highlight_viaje_id:
+                    self.current_viajes_page = idx // self.page_size_viajes
+                    found = True
+                    break
+            if not found:
+                self.current_viajes_page = 0
+        else:
+            self.current_viajes_page = 0
+
+        self.render_current_viajes_page()
+
+    def on_viajes_error(self, error_msg: str):
+        self.progress_viajes.hide()
+        self.lbl_pagination_viajes.setText("Error al cargar viajes.")
+        InfoBar.error(
+            title="Error de Consulta",
+            content=f"No se pudieron cargar los viajes: {error_msg}",
+            parent=self,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=4000
+        )
+
+    def on_viajes_page_size_changed(self, index: int):
+        val = self.combo_page_size_viajes.currentData()
+        if val is not None:
+            self.page_size_viajes = int(val)
+            self.current_viajes_page = 0
+            self.render_current_viajes_page()
+
+    def prev_viajes_page(self):
+        if self.current_viajes_page > 0:
+            self.current_viajes_page -= 1
+            self.render_current_viajes_page()
+
+    def next_viajes_page(self):
+        total = len(self.all_viajes)
+        total_pages = max(1, (total + self.page_size_viajes - 1) // self.page_size_viajes)
+        if self.current_viajes_page < total_pages - 1:
+            self.current_viajes_page += 1
+            self.render_current_viajes_page()
+
+    def render_current_viajes_page(self):
         self.table_viajes.setRowCount(0)
+        total_records = len(self.all_viajes)
 
-        for v in viajes:
-            row = self.table_viajes.rowCount()
-            self.table_viajes.insertRow(row)
+        if total_records == 0:
+            self.lbl_pagination_viajes.setText("0 viajes registrados para el filtro seleccionado.")
+            self.btn_prev_viajes.setEnabled(False)
+            self.btn_next_viajes.setEnabled(False)
+            self.highlight_viaje_id = None
+            return
 
+        total_pages = max(1, (total_records + self.page_size_viajes - 1) // self.page_size_viajes)
+        if self.current_viajes_page >= total_pages:
+            self.current_viajes_page = max(0, total_pages - 1)
+
+        start_idx = self.current_viajes_page * self.page_size_viajes
+        end_idx = min(start_idx + self.page_size_viajes, total_records)
+        page_items = self.all_viajes[start_idx:end_idx]
+
+        self.table_viajes.setRowCount(len(page_items))
+
+        row_to_select: Optional[int] = None
+
+        for r, v in enumerate(page_items):
             pasajeros_val = v.get("CANTIDAD_ESTIMADA_PASAJEROS")
             pasajeros_str = str(_safe_int(pasajeros_val)) if pasajeros_val is not None and str(pasajeros_val).strip() != "" and str(pasajeros_val) != "-" else "-"
 
-            self.table_viajes.setItem(row, 0, QTableWidgetItem(str(v.get("NUMERO_VIAJE", ""))))
-            self.table_viajes.setItem(row, 1, QTableWidgetItem(str(v.get("CODIGO_RUTA", ""))))
+            self.table_viajes.setItem(r, 0, QTableWidgetItem(str(v.get("NUMERO_VIAJE", ""))))
+            self.table_viajes.setItem(r, 1, QTableWidgetItem(str(v.get("CODIGO_RUTA", ""))))
 
             linea_cod = str(v.get("CODIGO_LINEA", ""))
             linea_col = str(v.get("COLOR_LINEA", "#0039A6"))
             chip = LineColorChip(linea_cod, linea_col, f"Línea {linea_cod}", self.table_viajes)
-            self.table_viajes.setCellWidget(row, 2, chip)
+            self.table_viajes.setCellWidget(r, 2, chip)
 
-            self.table_viajes.setItem(row, 3, QTableWidgetItem(str(v.get("FECHA", ""))))
-            self.table_viajes.setItem(row, 4, QTableWidgetItem(str(v.get("HORA_PROG_SALIDA", ""))))
-            self.table_viajes.setItem(row, 5, QTableWidgetItem(str(v.get("HORA_PROG_LLEGADA", ""))))
-            self.table_viajes.setItem(row, 6, QTableWidgetItem(f"{v.get('CODIGO_TREN', '')} ({v.get('MODELO_TREN', '')})"))
-            self.table_viajes.setItem(row, 7, QTableWidgetItem(str(v.get("CONDUCTOR", ""))))
+            self.table_viajes.setItem(r, 3, QTableWidgetItem(str(v.get("FECHA", ""))))
+            self.table_viajes.setItem(r, 4, QTableWidgetItem(str(v.get("HORA_PROG_SALIDA", ""))))
+            self.table_viajes.setItem(r, 5, QTableWidgetItem(str(v.get("HORA_PROG_LLEGADA", ""))))
+            self.table_viajes.setItem(r, 6, QTableWidgetItem(f"{v.get('CODIGO_TREN', '')} ({v.get('MODELO_TREN', '')})"))
+            self.table_viajes.setItem(r, 7, QTableWidgetItem(str(v.get("CONDUCTOR", ""))))
 
             st_viaje = str(v.get("ESTADO", "Programado"))
-            self.table_viajes.setCellWidget(row, 8, StatusBadge(st_viaje, self.table_viajes))
+            self.table_viajes.setCellWidget(r, 8, StatusBadge(st_viaje, self.table_viajes))
 
-            self.table_viajes.setItem(row, 9, QTableWidgetItem(pasajeros_str))
+            self.table_viajes.setItem(r, 9, QTableWidgetItem(pasajeros_str))
 
-            first_item = self.table_viajes.item(row, 0)
+            first_item = self.table_viajes.item(r, 0)
             if first_item is not None:
                 first_item.setData(Qt.ItemDataRole.UserRole, v)
 
+            if self.highlight_viaje_id is not None and _safe_int(v.get("ID_VIAJE", 0)) == self.highlight_viaje_id:
+                row_to_select = r
+
         auto_fit_table_columns(self.table_viajes)
+
+        # Actualizar indicador de paginación
+        self.lbl_pagination_viajes.setText(
+            f"Mostrando viajes {start_idx + 1} a {end_idx} de {total_records} (Página {self.current_viajes_page + 1} de {total_pages})"
+        )
+        self.btn_prev_viajes.setEnabled(self.current_viajes_page > 0)
+        self.btn_next_viajes.setEnabled(self.current_viajes_page < total_pages - 1)
+
+        # Re-seleccionar fila si corresponde
+        if row_to_select is not None:
+            self.table_viajes.selectRow(row_to_select)
+            it = self.table_viajes.item(row_to_select, 0)
+            if it is not None:
+                self.table_viajes.scrollToItem(it)
+            vp = self.table_viajes.viewport()
+            if vp is not None:
+                vp.update()
+
+        self.highlight_viaje_id = None
 
     def handle_programar_viaje(self):
         dlg = ProgramarViajeDialog(self.window(), ruta_preseleccionada_id=self.selected_route_id)
@@ -1353,19 +1562,8 @@ class M2RoutesInterface(QWidget):
                 self.combo_filtro_estado_viaje.setCurrentText("(Todos)")
                 self.combo_filtro_estado_viaje.blockSignals(False)
 
+            self.highlight_viaje_id = vid
             self.refresh_viajes()
-
-            for r in range(self.table_viajes.rowCount()):
-                it = self.table_viajes.item(r, 0)
-                if it is not None:
-                    it_data = it.data(Qt.ItemDataRole.UserRole)
-                    if it_data and _safe_int(it_data.get("ID_VIAJE", 0)) == vid:
-                        self.table_viajes.selectRow(r)
-                        self.table_viajes.scrollToItem(it)
-                        break
-            vp = self.table_viajes.viewport()
-            if vp is not None:
-                vp.update()
         else:
             InfoBar.error("Error", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
@@ -1407,19 +1605,8 @@ class M2RoutesInterface(QWidget):
                     self.combo_filtro_estado_viaje.blockSignals(False)
 
                 # Refrescar tabla y re-seleccionar la fila modificada para actualización visual inmediata
+                self.highlight_viaje_id = vid
                 self.refresh_viajes()
-
-                for r in range(self.table_viajes.rowCount()):
-                    it = self.table_viajes.item(r, 0)
-                    if it is not None:
-                        it_data = it.data(Qt.ItemDataRole.UserRole)
-                        if it_data and _safe_int(it_data.get("ID_VIAJE", 0)) == vid:
-                            self.table_viajes.selectRow(r)
-                            self.table_viajes.scrollToItem(it)
-                            break
-                vp = self.table_viajes.viewport()
-                if vp is not None:
-                    vp.update()
             else:
                 InfoBar.error("Error al Modificar Viaje", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
@@ -1462,19 +1649,8 @@ class M2RoutesInterface(QWidget):
                     self.combo_filtro_estado_viaje.setCurrentText("(Todos)")
                     self.combo_filtro_estado_viaje.blockSignals(False)
 
+                self.highlight_viaje_id = vid
                 self.refresh_viajes()
-
-                for r in range(self.table_viajes.rowCount()):
-                    it = self.table_viajes.item(r, 0)
-                    if it is not None:
-                        it_data = it.data(Qt.ItemDataRole.UserRole)
-                        if it_data and _safe_int(it_data.get("ID_VIAJE", 0)) == vid:
-                            self.table_viajes.selectRow(r)
-                            self.table_viajes.scrollToItem(it)
-                            break
-                vp = self.table_viajes.viewport()
-                if vp is not None:
-                    vp.update()
             else:
                 InfoBar.error("Error al Cancelar Viaje", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
@@ -1550,3 +1726,13 @@ class M2RoutesInterface(QWidget):
             self.refresh_viajes()
         else:
             InfoBar.error("Error", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+
+    def closeEvent(self, a0: Any):
+        if self.viajes_worker is not None and self.viajes_worker.isRunning():
+            self.viajes_worker.blockSignals(True)
+            self.viajes_worker = None
+        for worker in list(self.active_workers.values()):
+            if worker.isRunning():
+                worker.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)

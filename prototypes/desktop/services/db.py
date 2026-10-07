@@ -32,9 +32,9 @@ def get_pool() -> oracledb.ConnectionPool:
                 user=DB_USER,
                 password=DB_PASSWORD,
                 dsn=dsn,
-                min=1,
-                max=10,
-                increment=1
+                min=2,
+                max=25,
+                increment=2
             )
             ACTIVE_PDB = pdb
             _DB_POOL = pool
@@ -51,9 +51,9 @@ def get_pool() -> oracledb.ConnectionPool:
                 user=DB_USER,
                 password=DB_PASSWORD,
                 dsn=dsn,
-                min=1,
-                max=10,
-                increment=1
+                min=2,
+                max=25,
+                increment=2
             )
             ACTIVE_PDB = pdb
             _DB_POOL = pool

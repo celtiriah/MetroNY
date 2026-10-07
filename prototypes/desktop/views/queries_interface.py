@@ -477,4 +477,5 @@ class QueriesInterface(QWidget):
     def on_worker_finished(self):
         self.btn_run.setEnabled(True)
         self.btn_export.setEnabled(True)
-        QApplication.restoreOverrideCursor()
+        if QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()

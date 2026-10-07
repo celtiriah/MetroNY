@@ -20,6 +20,8 @@ from views.components.date_utils import (
     RecordCalendarPicker,
 )
 
+from views.components.table_pagination import TablePaginationBar
+
 __all__ = [
     "StatusBadge",
     "LineColorChip",
@@ -38,4 +40,5 @@ __all__ = [
     "AvailableDaysDelegate",
     "RecordCalendarView",
     "RecordCalendarPicker",
+    "TablePaginationBar",
 ]

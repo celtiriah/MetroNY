@@ -20,7 +20,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
-    QSizePolicy
+    QSizePolicy, QApplication
 )
 
 from qfluentwidgets import (
@@ -32,9 +32,10 @@ from qfluentwidgets import (
 )
 
 from services import m5_cards_service
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
     StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
-    to_qdate, qdate_to_iso, create_calendar_picker
+    to_qdate, qdate_to_iso, create_calendar_picker, TablePaginationBar
 )
 
 
@@ -873,12 +874,45 @@ class CardsInterface(QWidget):
 
         self.selected_card_num: Optional[str] = None
         self.selected_pasajero_id: Optional[int] = None
+        self.highlight_card_num: Optional[str] = None
+        self.highlight_pasajero_id: Optional[int] = None
         self.tarjetas_cache: List[Dict[str, Any]] = []
         self.pasajeros_cache: List[Dict[str, Any]] = []
         self.combo_recarga_tarjeta: Optional[ComboBox] = None
-
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
         self.init_ui()
-        self.load_cards_data()
+
+    def closeEvent(self, a0: Any):
+        for w in list(self.active_workers.values()):
+            if w.isRunning():
+                w.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -1210,6 +1244,10 @@ class CardsInterface(QWidget):
             header_taps.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         log_layout.addWidget(self.table_recent_taps)
 
+        self.pagination_recent_taps = TablePaginationBar(card_log, default_page_size=25, item_label="transacciones")
+        self.pagination_recent_taps.page_changed.connect(self._render_recent_taps_page)
+        log_layout.addWidget(self.pagination_recent_taps)
+
         content_layout.addWidget(card_log)
 
         scroll.setWidget(content_widget)
@@ -1282,6 +1320,10 @@ class CardsInterface(QWidget):
         self.table_cards.itemSelectionChanged.connect(self.on_card_table_selected)
         v_layout.addWidget(self.table_cards, stretch=5)
 
+        self.pagination_cards = TablePaginationBar(tab_widget, default_page_size=50, item_label="tarjetas")
+        self.pagination_cards.page_changed.connect(self._render_cards_page)
+        v_layout.addWidget(self.pagination_cards)
+
         # Historiales Subordinados (Pestañas de la tarjeta seleccionada)
         card_sub_hist = CardWidget(tab_widget)
         sub_layout = QVBoxLayout(card_sub_hist)
@@ -1298,7 +1340,11 @@ class CardsInterface(QWidget):
         self.stack_sub_hist = QStackedWidget(card_sub_hist)
 
         # Tabla 1: Pasos por Torniquete
-        self.table_viajes_tarjeta = TableWidget(self.stack_sub_hist)
+        container_sub_v = QWidget(self.stack_sub_hist)
+        l_sub_v = QVBoxLayout(container_sub_v)
+        l_sub_v.setContentsMargins(0, 0, 0, 0)
+        l_sub_v.setSpacing(4)
+        self.table_viajes_tarjeta = TableWidget(container_sub_v)
         self.table_viajes_tarjeta.setBorderVisible(True)
         self.table_viajes_tarjeta.setColumnCount(6)
         self.table_viajes_tarjeta.setHorizontalHeaderLabels([
@@ -1306,10 +1352,18 @@ class CardsInterface(QWidget):
         ])
         configure_interactive_table(self.table_viajes_tarjeta)
         self.table_viajes_tarjeta.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self.stack_sub_hist.addWidget(self.table_viajes_tarjeta)
+        l_sub_v.addWidget(self.table_viajes_tarjeta)
+        self.pagination_sub_viajes = TablePaginationBar(container_sub_v, default_page_size=25, item_label="pasos por torniquete")
+        self.pagination_sub_viajes.page_changed.connect(self._render_sub_viajes_page)
+        l_sub_v.addWidget(self.pagination_sub_viajes)
+        self.stack_sub_hist.addWidget(container_sub_v)
 
         # Tabla 2: Recargas
-        self.table_recargas_tarjeta = TableWidget(self.stack_sub_hist)
+        container_sub_r = QWidget(self.stack_sub_hist)
+        l_sub_r = QVBoxLayout(container_sub_r)
+        l_sub_r.setContentsMargins(0, 0, 0, 0)
+        l_sub_r.setSpacing(4)
+        self.table_recargas_tarjeta = TableWidget(container_sub_r)
         self.table_recargas_tarjeta.setBorderVisible(True)
         self.table_recargas_tarjeta.setColumnCount(7)
         self.table_recargas_tarjeta.setHorizontalHeaderLabels([
@@ -1317,7 +1371,11 @@ class CardsInterface(QWidget):
         ])
         configure_interactive_table(self.table_recargas_tarjeta)
         self.table_recargas_tarjeta.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self.stack_sub_hist.addWidget(self.table_recargas_tarjeta)
+        l_sub_r.addWidget(self.table_recargas_tarjeta)
+        self.pagination_sub_recargas = TablePaginationBar(container_sub_r, default_page_size=25, item_label="recargas")
+        self.pagination_sub_recargas.page_changed.connect(self._render_sub_recargas_page)
+        l_sub_r.addWidget(self.pagination_sub_recargas)
+        self.stack_sub_hist.addWidget(container_sub_r)
 
         sub_layout.addWidget(self.stack_sub_hist)
         v_layout.addWidget(card_sub_hist, stretch=4)
@@ -1379,6 +1437,10 @@ class CardsInterface(QWidget):
         self.table_pasajeros.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.table_pasajeros.itemSelectionChanged.connect(self.on_pasajero_table_selected)
         v_layout.addWidget(self.table_pasajeros, stretch=5)
+
+        self.pagination_pasajeros = TablePaginationBar(tab_widget, default_page_size=50, item_label="pasajeros")
+        self.pagination_pasajeros.page_changed.connect(self._render_pasajeros_page)
+        v_layout.addWidget(self.pagination_pasajeros)
 
         # Panel de Tarjetas del Pasajero Seleccionado
         card_pas_tar = CardWidget(tab_widget)
@@ -1646,9 +1708,28 @@ class CardsInterface(QWidget):
             InfoBar.error(title="Error al Pagar Pase", content=res.get("error", ""), parent=self.window(), duration=4000)
 
     def refresh_recent_taps(self):
-        viajes = m5_cards_service.get_historial_viajes(limit=8)
-        self.table_recent_taps.setRowCount(len(viajes))
-        for r, row in enumerate(viajes):
+        self.pagination_recent_taps.set_loading(True, "Consultando transacciones en torniquetes...")
+        self.run_async_fetch(
+            "recent_taps",
+            m5_cards_service.get_historial_viajes,
+            self._on_recent_taps_loaded,
+            self._on_recent_taps_error,
+            limit=2500
+        )
+
+    def _on_recent_taps_loaded(self, viajes: Any):
+        self.pagination_recent_taps.set_loading(False)
+        items = list(viajes) if isinstance(viajes, list) else []
+        sliced = self.pagination_recent_taps.set_data(items)
+        self._render_recent_taps_page(sliced)
+
+    def _on_recent_taps_error(self, err_msg: str):
+        self.pagination_recent_taps.set_loading(False)
+        self.pagination_recent_taps.lbl_info.setText("Error al consultar transacciones.")
+
+    def _render_recent_taps_page(self, page_items: list, *args: Any):
+        self.table_recent_taps.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_recent_taps.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_TRANSACCION"))))
             self.table_recent_taps.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NUMERO_TARJETA"))))
             tar_nom = _safe_str(row.get("TARIFA_APLICADA", "-"))
@@ -1672,20 +1753,39 @@ class CardsInterface(QWidget):
     # ==========================================================================
 
     def refresh_cards_list(self):
-        prev_card = self.selected_card_num
         filtro_estado = self.combo_filtro_estado.currentText()
         st = self.search_tarjetas.text().strip()
-
-        self.tarjetas_cache = m5_cards_service.get_tarjetas(
+        self.pagination_cards.set_loading(True, "Consultando catálogo de tarjetas...")
+        self.run_async_fetch(
+            "cards_list",
+            m5_cards_service.get_tarjetas,
+            self._on_cards_loaded,
+            self._on_cards_error,
             estado_filter=filtro_estado if filtro_estado != "(Todos)" else None,
             search_text=st if st else None
         )
 
-        # Llenar tabla de tarjetas
+    def _on_cards_loaded(self, cards: Any):
+        self.pagination_cards.set_loading(False)
+        self.tarjetas_cache = list(cards) if isinstance(cards, list) else []
+
+        pred = (lambda c: str(c.get("NUMERO_TARJETA")) == self.highlight_card_num) if self.highlight_card_num else None
+        sliced = self.pagination_cards.set_data(self.tarjetas_cache, highlight_predicate=pred)
+        self._render_cards_page(sliced)
+        self._populate_cards_combo(self.tarjetas_cache)
+        self.highlight_card_num = None
+
+    def _on_cards_error(self, err: str):
+        self.pagination_cards.set_loading(False)
+        self.pagination_cards.lbl_info.setText("Error al consultar tarjetas.")
+
+    def _render_cards_page(self, page_items: list, *args: Any):
         self.table_cards.blockSignals(True)
         self.table_cards.clearContents()
-        self.table_cards.setRowCount(len(self.tarjetas_cache))
-        for r, row in enumerate(self.tarjetas_cache):
+        self.table_cards.setRowCount(len(page_items))
+
+        selected_row_idx: Optional[int] = None
+        for r, row in enumerate(page_items):
             num = _safe_str(row.get("NUMERO_TARJETA"))
             soporte = _safe_str(row.get("TIPO_SOPORTE"), "Tarjeta")
             saldo = _safe_float(row.get("SALDO_DISPONIBLE"))
@@ -1694,7 +1794,7 @@ class CardsInterface(QWidget):
             self.table_cards.setItem(r, 0, QTableWidgetItem(num))
             self.table_cards.setCellWidget(r, 1, StatusBadge(soporte, self.table_cards))
             self.table_cards.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("PASAJERO"))))
-            
+
             tipo_p = _safe_str(row.get("TIPO_PASAJERO"))
             self.table_cards.setCellWidget(r, 3, StatusBadge(tipo_p, self.table_cards))
 
@@ -1716,7 +1816,6 @@ class CardsInterface(QWidget):
                 tar_display = f"{tar_nom} (${tar_mto:.2f})"
 
             self.table_cards.setCellWidget(r, 4, StatusBadge(tar_display, self.table_cards))
-
             self.table_cards.setItem(r, 5, QTableWidgetItem(f"${saldo:.2f}"))
             self.table_cards.setItem(r, 6, QTableWidgetItem(_safe_str(row.get("FECHA_EMISION"))))
             self.table_cards.setItem(r, 7, QTableWidgetItem(_safe_str(row.get("FECHA_VENCIMIENTO"))))
@@ -1725,10 +1824,17 @@ class CardsInterface(QWidget):
             est_card = _safe_str(row.get("ESTADO"))
             self.table_cards.setCellWidget(r, 9, StatusBadge(est_card, self.table_cards))
 
+            if self.selected_card_num and num == self.selected_card_num:
+                selected_row_idx = r
+
         self.table_cards.blockSignals(False)
         auto_fit_table_columns(self.table_cards)
 
-        # Llenar combo de tarjetas de la pestaña 1 (simulador y recarga)
+        if selected_row_idx is not None:
+            self.table_cards.selectRow(selected_row_idx)
+
+    def _populate_cards_combo(self, all_cards: list):
+        prev_card = self.selected_card_num
         self.combo_tarjetas.blockSignals(True)
         self.combo_tarjetas.clear()
         combo_rec = self.combo_recarga_tarjeta
@@ -1736,11 +1842,9 @@ class CardsInterface(QWidget):
             combo_rec.blockSignals(True)
             combo_rec.clear()
 
-        # Opción para emisión y validación inmediata de boletos de un solo viaje
         self.combo_tarjetas.addItem("[Boleto] Emitir y Validar Boleto de Uso Único ($2.90)", userData="__EMITIR_BOLETO_INMEDIATO__")
 
         target_idx = 0
-        all_cards = m5_cards_service.get_tarjetas()
         for i, t in enumerate(all_cards):
             c_num = _safe_str(t.get("NUMERO_TARJETA"))
             tit = _safe_str(t.get("PASAJERO"))
@@ -1797,13 +1901,11 @@ class CardsInterface(QWidget):
                 combo_rec.setCurrentIndex(0)
             combo_rec.blockSignals(False)
 
-        # Actualizar visual card y proyección
         active_num = self.combo_tarjetas.currentData()
         if active_num:
             self.set_active_card(str(active_num))
 
         self.update_tab1_recharge_projection()
-        self.refresh_recent_taps()
 
     def on_card_combo_selected(self, index: int):
         card_num = self.combo_tarjetas.currentData()
@@ -2130,11 +2232,43 @@ class CardsInterface(QWidget):
             self.load_card_sub_histories(self.selected_card_num)
 
     def load_card_sub_histories(self, numero_tarjeta: str):
-        # 1. Viajes
-        viajes = m5_cards_service.get_historial_viajes(numero_tarjeta=numero_tarjeta)
+        if not numero_tarjeta or numero_tarjeta == "__EMITIR_BOLETO_INMEDIATO__":
+            self.pagination_sub_viajes.set_data([])
+            self._render_sub_viajes_page([])
+            self.pagination_sub_recargas.set_data([])
+            self._render_sub_recargas_page([])
+            return
+
+        self.pagination_sub_viajes.set_loading(True, "Consultando viajes...")
+        self.pagination_sub_recargas.set_loading(True, "Consultando recargas...")
+        self.run_async_fetch(
+            "sub_histories",
+            lambda num: (
+                m5_cards_service.get_historial_viajes(numero_tarjeta=num, limit=1000),
+                m5_cards_service.get_historial_recargas(numero_tarjeta=num)
+            ),
+            self._on_sub_histories_loaded,
+            self._on_sub_histories_error,
+            numero_tarjeta
+        )
+
+    def _on_sub_histories_loaded(self, result: Any):
+        viajes, recargas = result if isinstance(result, tuple) else ([], [])
+        self.pagination_sub_viajes.set_loading(False)
+        self.pagination_sub_recargas.set_loading(False)
+        sliced_v = self.pagination_sub_viajes.set_data(viajes if isinstance(viajes, list) else [])
+        self._render_sub_viajes_page(sliced_v)
+        sliced_r = self.pagination_sub_recargas.set_data(recargas if isinstance(recargas, list) else [])
+        self._render_sub_recargas_page(sliced_r)
+
+    def _on_sub_histories_error(self, err_msg: str):
+        self.pagination_sub_viajes.set_loading(False, "Error al consultar historial.")
+        self.pagination_sub_recargas.set_loading(False, "Error al consultar recargas.")
+
+    def _render_sub_viajes_page(self, page_items: list, *args: Any):
         self.table_viajes_tarjeta.clearContents()
-        self.table_viajes_tarjeta.setRowCount(len(viajes))
-        for r, row in enumerate(viajes):
+        self.table_viajes_tarjeta.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_viajes_tarjeta.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_TRANSACCION"))))
             self.table_viajes_tarjeta.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("ESTACION_INGRESO"))))
             self.table_viajes_tarjeta.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("ESTACION_SALIDA"))))
@@ -2144,11 +2278,10 @@ class CardsInterface(QWidget):
             self.table_viajes_tarjeta.setCellWidget(r, 5, StatusBadge(est_tx, self.table_viajes_tarjeta))
         auto_fit_table_columns(self.table_viajes_tarjeta)
 
-        # 2. Recargas
-        recargas = m5_cards_service.get_historial_recargas(numero_tarjeta=numero_tarjeta)
+    def _render_sub_recargas_page(self, page_items: list, *args: Any):
         self.table_recargas_tarjeta.clearContents()
-        self.table_recargas_tarjeta.setRowCount(len(recargas))
-        for r, row in enumerate(recargas):
+        self.table_recargas_tarjeta.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_recargas_tarjeta.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_TRANSACCION"))))
             self.table_recargas_tarjeta.setItem(r, 1, QTableWidgetItem(f"${_safe_float(row.get('MONTO')):.2f}"))
             self.table_recargas_tarjeta.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("MEDIO_PAGO"))))
@@ -2393,18 +2526,36 @@ class CardsInterface(QWidget):
     def refresh_pasajeros(self):
         tipo = self.combo_filtro_tipo_pas.currentText()
         st = self.search_pasajeros.text().strip()
-
-        self.pasajeros_cache = m5_cards_service.get_pasajeros(
+        self.pagination_pasajeros.set_loading(True, "Consultando padrón de pasajeros...")
+        self.run_async_fetch(
+            "pasajeros_list",
+            m5_cards_service.get_pasajeros,
+            self._on_pasajeros_loaded,
+            self._on_pasajeros_error,
             tipo_filter=tipo if tipo != "(Todos)" else None,
             search_text=st if st else None
         )
 
+    def _on_pasajeros_loaded(self, pas: Any):
+        self.pagination_pasajeros.set_loading(False)
+        self.pasajeros_cache = list(pas) if isinstance(pas, list) else []
+        pred = (lambda p: _safe_int(p.get("ID_PASAJERO")) == self.highlight_pasajero_id) if self.highlight_pasajero_id else None
+        sliced = self.pagination_pasajeros.set_data(self.pasajeros_cache, highlight_predicate=pred)
+        self._render_pasajeros_page(sliced)
+        self.highlight_pasajero_id = None
+
+    def _on_pasajeros_error(self, err: str):
+        self.pagination_pasajeros.set_loading(False)
+        self.pagination_pasajeros.lbl_info.setText("Error al consultar pasajeros.")
+
+    def _render_pasajeros_page(self, page_items: list, *args: Any):
         self.table_pasajeros.blockSignals(True)
-        self.table_pasajeros.setRowCount(len(self.pasajeros_cache))
-        for r, row in enumerate(self.pasajeros_cache):
+        self.table_pasajeros.clearContents()
+        self.table_pasajeros.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_pasajeros.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("IDENTIFICADOR"))))
             self.table_pasajeros.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NOMBRE"))))
-            
+
             tipo_p = _safe_str(row.get("TIPO_PASAJERO"))
             self.table_pasajeros.setCellWidget(r, 2, StatusBadge(tipo_p, self.table_pasajeros))
 
@@ -2412,7 +2563,7 @@ class CardsInterface(QWidget):
             self.table_pasajeros.setItem(r, 4, QTableWidgetItem(_safe_str(row.get("TELEFONO"))))
             self.table_pasajeros.setItem(r, 5, QTableWidgetItem(_safe_str(row.get("CORREO_ELECTRONICO"))))
             self.table_pasajeros.setItem(r, 6, QTableWidgetItem(_safe_str(row.get("TOTAL_TARJETAS"))))
-            
+
             est_p = _safe_str(row.get("ESTADO"))
             self.table_pasajeros.setCellWidget(r, 7, StatusBadge(est_p, self.table_pasajeros))
 

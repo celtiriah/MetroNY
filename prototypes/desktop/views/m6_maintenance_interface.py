@@ -13,13 +13,13 @@ Cumple estrictamente con los 9 requerimientos oficiales y las Reglas de Negocio 
 """
 import re
 from datetime import datetime, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from PyQt5.QtCore import Qt, QTime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
-    QLabel, QSplitter
+    QLabel, QSplitter, QApplication
 )
 
 from qfluentwidgets import (
@@ -31,9 +31,11 @@ from qfluentwidgets import (
 )
 
 from services import m6_maintenance_service
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
     StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
-    to_qdate, qdate_to_iso, create_calendar_picker, create_time_picker
+    to_qdate, qdate_to_iso, create_calendar_picker, create_time_picker,
+    TablePaginationBar
 )
 
 
@@ -647,12 +649,46 @@ class MaintenanceInterface(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("maintenanceInterface")
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
         self.ordenes_cache: List[Dict[str, Any]] = []
         self.equipos_cache: List[Dict[str, Any]] = []
         self.tecnicos_cache: List[Dict[str, Any]] = []
         self.repuestos_cache: List[Dict[str, Any]] = []
         self.selected_orden_id: Optional[int] = None
         self.init_ui()
+
+    def closeEvent(self, a0: Any):
+        for worker in list(self.active_workers.values()):
+            if worker.isRunning():
+                worker.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -817,6 +853,10 @@ class MaintenanceInterface(QWidget):
         self.table_ordenes.itemSelectionChanged.connect(self.on_orden_selected)
         v_layout.addWidget(self.table_ordenes, stretch=1)
 
+        self.pagination_ordenes = TablePaginationBar(tab_widget, default_page_size=50, item_label="órdenes")
+        self.pagination_ordenes.page_changed.connect(self._render_ordenes_page)
+        v_layout.addWidget(self.pagination_ordenes)
+
         self.stack_views.addWidget(tab_widget)
 
     def refresh_ordenes(self):
@@ -824,15 +864,45 @@ class MaintenanceInterface(QWidget):
         tipo = self.combo_filtro_tipo.currentText()
         st = self.search_ordenes.text().strip()
 
-        self.ordenes_cache = m6_maintenance_service.get_ordenes(
-            estado_filter=est if est != "(Todos)" else None,
-            tipo_filter=tipo if tipo != "(Todos)" else None,
-            search_text=st if st else None
-        )
+        est_param = est if est != "(Todos)" else None
+        tipo_param = tipo if tipo != "(Todos)" else None
+        st_param = st if st else None
 
+        self.pagination_ordenes.set_loading(True, "Cargando órdenes de trabajo...")
+
+        def _fetch():
+            ordenes = m6_maintenance_service.get_ordenes(
+                estado_filter=est_param,
+                tipo_filter=tipo_param,
+                search_text=st_param
+            )
+            kpis = m6_maintenance_service.get_kpis_mantenimiento()
+            return ordenes, kpis
+
+        def _on_loaded(data: Tuple[List[Dict[str, Any]], Dict[str, Any]]):
+            self.pagination_ordenes.set_loading(False)
+            ordenes, kpis = data
+            self.ordenes_cache = ordenes or []
+            self._update_kpis_display(kpis)
+            page_items = self.pagination_ordenes.set_data(self.ordenes_cache, reset_page=True)
+            self._render_ordenes_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_ordenes.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Órdenes",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("ordenes", _fetch, _on_loaded, _on_error)
+
+    def _render_ordenes_page(self, page_items: List[Dict[str, Any]]):
         self.table_ordenes.blockSignals(True)
-        self.table_ordenes.setRowCount(len(self.ordenes_cache))
-        for r, row in enumerate(self.ordenes_cache):
+        self.table_ordenes.clearContents()
+        self.table_ordenes.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             num = _safe_str(row.get("NUMERO_ORDEN"))
             cod_eq = _safe_str(row.get("CODIGO_EQUIPO"))
             tipo_trab = _safe_str(row.get("TIPO_MANTENIMIENTO"))
@@ -855,24 +925,30 @@ class MaintenanceInterface(QWidget):
 
         self.table_ordenes.blockSignals(False)
         auto_fit_table_columns(self.table_ordenes)
-        self.refresh_kpis()
+
+    def _update_kpis_display(self, kpis: Dict[str, Any]):
+        self.lbl_kpi_total.setText(f"Total Órdenes: {kpis.get('total_ordenes', 0)}")
+        self.lbl_kpi_ejecucion.setText(f"En Ejecución: {kpis.get('en_ejecucion', 0)}")
+        self.lbl_kpi_prog.setText(f"Programadas: {kpis.get('programadas', 0)}")
+        self.lbl_kpi_comp.setText(f"Completadas: {kpis.get('completadas', 0)}")
+        self.lbl_kpi_costo.setText(f"Inversión Total: ${kpis.get('inversion_total', 0):,.2f}")
 
     def refresh_kpis(self):
         kpis = m6_maintenance_service.get_kpis_mantenimiento()
-        self.lbl_kpi_total.setText(f"Total Órdenes: {kpis['total_ordenes']}")
-        self.lbl_kpi_ejecucion.setText(f"En Ejecución: {kpis['en_ejecucion']}")
-        self.lbl_kpi_prog.setText(f"Programadas: {kpis['programadas']}")
-        self.lbl_kpi_comp.setText(f"Completadas: {kpis['completadas']}")
-        self.lbl_kpi_costo.setText(f"Inversión Total: ${kpis['inversion_total']:,.2f}")
+        self._update_kpis_display(kpis)
 
     def on_orden_selected(self):
         selected = self.table_ordenes.selectedItems()
         if selected:
             r = selected[0].row()
-            if r < len(self.ordenes_cache):
-                self.selected_orden_id = _safe_int(self.ordenes_cache[r].get("ID_ORDEN"))
-        else:
-            self.selected_orden_id = None
+            num_item = self.table_ordenes.item(r, 0)
+            if num_item:
+                num = num_item.text()
+                orden = next((o for o in self.ordenes_cache if str(o.get("NUMERO_ORDEN")) == num), None)
+                if orden:
+                    self.selected_orden_id = _safe_int(orden.get("ID_ORDEN"))
+                    return
+        self.selected_orden_id = None
 
     def handle_nueva_orden(self):
         equipos = m6_maintenance_service.get_equipos()
@@ -1065,6 +1141,11 @@ class MaintenanceInterface(QWidget):
         configure_interactive_table(self.table_equipos)
 
         v_layout.addWidget(self.table_equipos, stretch=1)
+
+        self.pagination_equipos = TablePaginationBar(tab_widget, default_page_size=50, item_label="equipos")
+        self.pagination_equipos.page_changed.connect(self._render_equipos_page)
+        v_layout.addWidget(self.pagination_equipos)
+
         self.stack_views.addWidget(tab_widget)
 
     def refresh_equipos(self):
@@ -1072,15 +1153,41 @@ class MaintenanceInterface(QWidget):
         est = self.combo_filtro_eq_estado.currentText()
         st = self.search_equipos.text().strip()
 
-        self.equipos_cache = m6_maintenance_service.get_equipos(
-            tipo_filter=tipo if tipo != "(Todos)" else None,
-            estado_filter=est if est != "(Todos)" else None,
-            search_text=st if st else None
-        )
+        tipo_param = tipo if tipo != "(Todos)" else None
+        est_param = est if est != "(Todos)" else None
+        st_param = st if st else None
 
+        self.pagination_equipos.set_loading(True, "Cargando inventario de equipos...")
+
+        def _fetch():
+            return m6_maintenance_service.get_equipos(
+                tipo_filter=tipo_param,
+                estado_filter=est_param,
+                search_text=st_param
+            )
+
+        def _on_loaded(data: List[Dict[str, Any]]):
+            self.pagination_equipos.set_loading(False)
+            self.equipos_cache = data or []
+            page_items = self.pagination_equipos.set_data(self.equipos_cache, reset_page=True)
+            self._render_equipos_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_equipos.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Equipos",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("equipos", _fetch, _on_loaded, _on_error)
+
+    def _render_equipos_page(self, page_items: List[Dict[str, Any]]):
         self.table_equipos.blockSignals(True)
-        self.table_equipos.setRowCount(len(self.equipos_cache))
-        for r, row in enumerate(self.equipos_cache):
+        self.table_equipos.clearContents()
+        self.table_equipos.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             cod = _safe_str(row.get("CODIGO_EQUIPO"))
             tipo_eq = _safe_str(row.get("TIPO_EQUIPO"))
             ubic = _safe_str(row.get("UBICACION"))
@@ -1139,7 +1246,13 @@ class MaintenanceInterface(QWidget):
             return
 
         r = selected[0].row()
-        equipo = self.equipos_cache[r]
+        item_cod = self.table_equipos.item(r, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        equipo = next((eq for eq in self.equipos_cache if str(eq.get("CODIGO_EQUIPO")) == cod), None)
+        if not equipo:
+            return
         id_eq = _safe_int(equipo.get("ID_EQUIPO"))
 
         dialog = EquipoDialog(equipo, self.window())
@@ -1174,7 +1287,13 @@ class MaintenanceInterface(QWidget):
             return
 
         r = selected[0].row()
-        equipo = self.equipos_cache[r]
+        item_cod = self.table_equipos.item(r, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        equipo = next((eq for eq in self.equipos_cache if str(eq.get("CODIGO_EQUIPO")) == cod), None)
+        if not equipo:
+            return
         id_eq = _safe_int(equipo.get("ID_EQUIPO"))
         cod_eq = _safe_str(equipo.get("CODIGO_EQUIPO"))
 
@@ -1435,6 +1554,11 @@ class MaintenanceInterface(QWidget):
         configure_interactive_table(self.table_catalogo_repuestos)
 
         left_layout.addWidget(self.table_catalogo_repuestos, stretch=1)
+
+        self.pagination_repuestos = TablePaginationBar(left_widget, default_page_size=25, item_label="repuestos")
+        self.pagination_repuestos.page_changed.connect(self._render_repuestos_page)
+        left_layout.addWidget(self.pagination_repuestos)
+
         splitter.addWidget(left_widget)
 
         # Panel Derecho: Repuestos Utilizados en la Orden Seleccionada
@@ -1485,14 +1609,50 @@ class MaintenanceInterface(QWidget):
         self.stack_views.addWidget(tab_widget)
 
     def refresh_repuestos(self):
-        # 1. Catalogo
         st = self.search_repuestos.text().strip()
-        self.repuestos_cache = m6_maintenance_service.get_catalogo_repuestos(st if st else None)
+        st_param = st if st else None
 
+        self.pagination_repuestos.set_loading(True, "Cargando catálogo de repuestos...")
+
+        def _fetch():
+            catalogo = m6_maintenance_service.get_catalogo_repuestos(st_param)
+            ordenes = m6_maintenance_service.get_ordenes()
+            return catalogo, ordenes
+
+        def _on_loaded(data: Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]):
+            self.pagination_repuestos.set_loading(False)
+            catalogo, ordenes = data
+            self.repuestos_cache = catalogo or []
+            page_items = self.pagination_repuestos.set_data(self.repuestos_cache, reset_page=True)
+            self._render_repuestos_page(page_items)
+
+            prev_id = self.combo_rep_orden.currentData()
+            self.combo_rep_orden.blockSignals(True)
+            self.combo_rep_orden.clear()
+            for o in ordenes:
+                num = _safe_str(o.get("NUMERO_ORDEN"))
+                eq = _safe_str(o.get("CODIGO_EQUIPO"))
+                id_ord = _safe_int(o.get("ID_ORDEN"))
+                self.combo_rep_orden.addItem(f"{num} - {eq}", userData=id_ord)
+            if prev_id:
+                for idx in range(self.combo_rep_orden.count()):
+                    if self.combo_rep_orden.itemData(idx) == prev_id:
+                        self.combo_rep_orden.setCurrentIndex(idx)
+                        break
+            self.combo_rep_orden.blockSignals(False)
+            self.on_rep_orden_changed()
+
+        def _on_error(err: str):
+            self.pagination_repuestos.set_loading(False)
+            InfoBar.error(title="Error al Cargar Repuestos", content=err, parent=self.window(), duration=4000)
+
+        self.run_async_fetch("repuestos", _fetch, _on_loaded, _on_error)
+
+    def _render_repuestos_page(self, page_items: List[Dict[str, Any]]):
         self.table_catalogo_repuestos.blockSignals(True)
         self.table_catalogo_repuestos.clearContents()
-        self.table_catalogo_repuestos.setRowCount(len(self.repuestos_cache))
-        for r, row in enumerate(self.repuestos_cache):
+        self.table_catalogo_repuestos.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             cod = _safe_str(row.get("CODIGO"))
             nom = _safe_str(row.get("NOMBRE"))
             costo = _safe_float(row.get("COSTO_UNITARIO"))
@@ -1508,25 +1668,6 @@ class MaintenanceInterface(QWidget):
             self.table_catalogo_repuestos.setItem(r, 4, QTableWidgetItem(total_c))
         self.table_catalogo_repuestos.blockSignals(False)
         auto_fit_table_columns(self.table_catalogo_repuestos)
-
-        # 2. Selector de orden
-        ordenes = m6_maintenance_service.get_ordenes()
-        prev_id = self.combo_rep_orden.currentData()
-        self.combo_rep_orden.blockSignals(True)
-        self.combo_rep_orden.clear()
-        for o in ordenes:
-            num = _safe_str(o.get("NUMERO_ORDEN"))
-            eq = _safe_str(o.get("CODIGO_EQUIPO"))
-            id_ord = _safe_int(o.get("ID_ORDEN"))
-            self.combo_rep_orden.addItem(f"{num} - {eq}", userData=id_ord)
-        if prev_id:
-            for idx in range(self.combo_rep_orden.count()):
-                if self.combo_rep_orden.itemData(idx) == prev_id:
-                    self.combo_rep_orden.setCurrentIndex(idx)
-                    break
-        self.combo_rep_orden.blockSignals(False)
-
-        self.on_rep_orden_changed()
 
     def on_rep_orden_changed(self):
         id_ord = self.combo_rep_orden.currentData()
@@ -1585,15 +1726,21 @@ class MaintenanceInterface(QWidget):
             return
 
         r = selected[0].row()
-        repuesto = self.repuestos_cache[r]
-        id_rep = _safe_int(repuesto.get("ID_REPUESTO"))
+        item = self.table_catalogo_repuestos.item(r, 0)
+        id_rep = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if id_rep is None:
+            return
+        id_rep_int = int(id_rep)
+        repuesto = next((rep for rep in self.repuestos_cache if _safe_int(rep.get("ID_REPUESTO")) == id_rep_int), None)
+        if not repuesto:
+            return
 
         dialog = RepuestoDialog(repuesto, self.window())
         if dialog.exec():
             if not dialog.validate():
                 return
             res = m6_maintenance_service.modificar_repuesto(
-                id_repuesto=id_rep,
+                id_repuesto=id_rep_int,
                 codigo=dialog.txt_codigo.text(),
                 nombre=dialog.txt_nombre.text(),
                 costo_unitario=dialog.spin_costo.value(),
@@ -1612,11 +1759,17 @@ class MaintenanceInterface(QWidget):
             return
 
         r = selected[0].row()
-        repuesto = self.repuestos_cache[r]
-        id_rep = _safe_int(repuesto.get("ID_REPUESTO"))
+        item = self.table_catalogo_repuestos.item(r, 0)
+        id_rep = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if id_rep is None:
+            return
+        id_rep_int = int(id_rep)
+        repuesto = next((rep for rep in self.repuestos_cache if _safe_int(rep.get("ID_REPUESTO")) == id_rep_int), None)
+        if not repuesto:
+            return
         cod = _safe_str(repuesto.get("CODIGO"))
 
-        deps = m6_maintenance_service.verificar_dependencias_repuesto(id_rep)
+        deps = m6_maintenance_service.verificar_dependencias_repuesto(id_rep_int)
         if deps.get("tiene_dependencias"):
             tot = deps.get("total_consumos", 0)
             InfoBar.error(
@@ -1629,12 +1782,13 @@ class MaintenanceInterface(QWidget):
 
         box = MessageBox("Eliminar Repuesto", f"¿Confirma la eliminación del repuesto {cod} del catálogo?", self.window())
         if box.exec():
-            res = m6_maintenance_service.eliminar_repuesto(id_rep)
+            res = m6_maintenance_service.eliminar_repuesto(id_rep_int)
             if res.get("success"):
                 InfoBar.success("Repuesto Eliminado", res.get("mensaje", ""), parent=self.window(), duration=3000)
                 self.refresh_repuestos()
             else:
                 InfoBar.error("Restricción de Integridad", res.get("error", ""), parent=self.window(), duration=5000)
+
 
     def handle_consumir_repuesto(self):
         id_ord = self.combo_rep_orden.currentData()
@@ -1753,47 +1907,61 @@ class MaintenanceInterface(QWidget):
         self.stack_views.addWidget(tab_widget)
 
     def refresh_alertas(self):
-        # 1. Trenes en Taller
-        trenes = m6_maintenance_service.get_trenes_en_taller()
-        self.table_taller.blockSignals(True)
-        self.table_taller.setRowCount(len(trenes))
-        for r, t in enumerate(trenes):
-            self.table_taller.setItem(r, 0, QTableWidgetItem(_safe_str(t.get("CODIGO_TREN"))))
-            self.table_taller.setItem(r, 1, QTableWidgetItem(_safe_str(t.get("NOMBRE_MODELO"))))
-            self.table_taller.setItem(r, 2, QTableWidgetItem(_safe_str(t.get("DEPOSITO"))))
-            self.table_taller.setItem(r, 3, QTableWidgetItem(_safe_str(t.get("NUMERO_ORDEN"))))
-            self.table_taller.setCellWidget(r, 4, StatusBadge(_safe_str(t.get("TIPO_MANTENIMIENTO")), self.table_taller))
-            self.table_taller.setCellWidget(r, 5, StatusBadge(_safe_str(t.get("PRIORIDAD")), self.table_taller))
-            self.table_taller.setItem(r, 6, QTableWidgetItem(_safe_str(t.get("TECNICO_RESPONSABLE"))))
-            self.table_taller.setItem(r, 7, QTableWidgetItem(_safe_str(t.get("FECHA_INGRESO_TALLER"))))
-        self.table_taller.blockSignals(False)
-        auto_fit_table_columns(self.table_taller)
+        def _fetch():
+            trenes = m6_maintenance_service.get_trenes_en_taller()
+            equipos_fuera = m6_maintenance_service.get_equipos_fuera_servicio()
+            vencidas = m6_maintenance_service.get_equipos_inspeccion_vencida()
+            return trenes, equipos_fuera, vencidas
 
-        # 2. Equipos fuera de servicio
-        equipos_fuera = m6_maintenance_service.get_equipos_fuera_servicio()
-        self.table_fuera.blockSignals(True)
-        self.table_fuera.setRowCount(len(equipos_fuera))
-        for r, eq in enumerate(equipos_fuera):
-            self.table_fuera.setItem(r, 0, QTableWidgetItem(_safe_str(eq.get("CODIGO_EQUIPO"))))
-            self.table_fuera.setItem(r, 1, QTableWidgetItem(_safe_str(eq.get("TIPO_EQUIPO"))))
-            self.table_fuera.setItem(r, 2, QTableWidgetItem(_safe_str(eq.get("UBICACION"))))
-            self.table_fuera.setCellWidget(r, 3, StatusBadge(_safe_str(eq.get("ESTADO")), self.table_fuera))
-        self.table_fuera.blockSignals(False)
-        auto_fit_table_columns(self.table_fuera)
+        def _on_loaded(data: Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]):
+            trenes, equipos_fuera, vencidas = data
 
-        # 3. Inspecciones vencidas
-        vencidas = m6_maintenance_service.get_equipos_inspeccion_vencida()
-        self.table_vencidas.blockSignals(True)
-        self.table_vencidas.setRowCount(len(vencidas))
-        for r, v in enumerate(vencidas):
-            dias = _safe_int(v.get("DIAS_RESTANTES"))
-            dias_str = f"VENCIDA ({abs(dias)} días de atraso)" if dias < 0 else f"{dias} días restantes"
-            self.table_vencidas.setItem(r, 0, QTableWidgetItem(_safe_str(v.get("CODIGO_EQUIPO"))))
-            self.table_vencidas.setItem(r, 1, QTableWidgetItem(_safe_str(v.get("TIPO_EQUIPO"))))
-            self.table_vencidas.setItem(r, 2, QTableWidgetItem(_safe_str(v.get("FECHA_PROXIMA_REVISION"), "Sin Programar")))
-            self.table_vencidas.setCellWidget(r, 3, StatusBadge(dias_str, self.table_vencidas))
-        self.table_vencidas.blockSignals(False)
-        auto_fit_table_columns(self.table_vencidas)
+            # 1. Trenes en Taller
+            self.table_taller.blockSignals(True)
+            self.table_taller.clearContents()
+            self.table_taller.setRowCount(len(trenes))
+            for r, t in enumerate(trenes):
+                self.table_taller.setItem(r, 0, QTableWidgetItem(_safe_str(t.get("CODIGO_TREN"))))
+                self.table_taller.setItem(r, 1, QTableWidgetItem(_safe_str(t.get("NOMBRE_MODELO"))))
+                self.table_taller.setItem(r, 2, QTableWidgetItem(_safe_str(t.get("DEPOSITO"))))
+                self.table_taller.setItem(r, 3, QTableWidgetItem(_safe_str(t.get("NUMERO_ORDEN"))))
+                self.table_taller.setCellWidget(r, 4, StatusBadge(_safe_str(t.get("TIPO_MANTENIMIENTO")), self.table_taller))
+                self.table_taller.setCellWidget(r, 5, StatusBadge(_safe_str(t.get("PRIORIDAD")), self.table_taller))
+                self.table_taller.setItem(r, 6, QTableWidgetItem(_safe_str(t.get("TECNICO_RESPONSABLE"))))
+                self.table_taller.setItem(r, 7, QTableWidgetItem(_safe_str(t.get("FECHA_INGRESO_TALLER"))))
+            self.table_taller.blockSignals(False)
+            auto_fit_table_columns(self.table_taller)
+
+            # 2. Equipos fuera de servicio
+            self.table_fuera.blockSignals(True)
+            self.table_fuera.clearContents()
+            self.table_fuera.setRowCount(len(equipos_fuera))
+            for r, eq in enumerate(equipos_fuera):
+                self.table_fuera.setItem(r, 0, QTableWidgetItem(_safe_str(eq.get("CODIGO_EQUIPO"))))
+                self.table_fuera.setItem(r, 1, QTableWidgetItem(_safe_str(eq.get("TIPO_EQUIPO"))))
+                self.table_fuera.setItem(r, 2, QTableWidgetItem(_safe_str(eq.get("UBICACION"))))
+                self.table_fuera.setCellWidget(r, 3, StatusBadge(_safe_str(eq.get("ESTADO")), self.table_fuera))
+            self.table_fuera.blockSignals(False)
+            auto_fit_table_columns(self.table_fuera)
+
+            # 3. Inspecciones vencidas
+            self.table_vencidas.blockSignals(True)
+            self.table_vencidas.clearContents()
+            self.table_vencidas.setRowCount(len(vencidas))
+            for r, v in enumerate(vencidas):
+                dias = _safe_int(v.get("DIAS_RESTANTES"))
+                dias_str = f"VENCIDA ({abs(dias)} días de atraso)" if dias < 0 else f"{dias} días restantes"
+                self.table_vencidas.setItem(r, 0, QTableWidgetItem(_safe_str(v.get("CODIGO_EQUIPO"))))
+                self.table_vencidas.setItem(r, 1, QTableWidgetItem(_safe_str(v.get("TIPO_EQUIPO"))))
+                self.table_vencidas.setItem(r, 2, QTableWidgetItem(_safe_str(v.get("FECHA_PROXIMA_REVISION"), "Sin Programar")))
+                self.table_vencidas.setCellWidget(r, 3, StatusBadge(dias_str, self.table_vencidas))
+            self.table_vencidas.blockSignals(False)
+            auto_fit_table_columns(self.table_vencidas)
+
+        def _on_error(err: str):
+            InfoBar.error(title="Error al Cargar Alertas", content=err, parent=self.window(), duration=4000)
+
+        self.run_async_fetch("alertas", _fetch, _on_loaded, _on_error)
 
     # ==========================================================================
     # CARGA GLOBAL DESDE MAIN WINDOW

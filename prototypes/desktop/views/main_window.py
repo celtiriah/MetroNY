@@ -238,21 +238,17 @@ class MetroFluentApp(FluentWindow):
                 QApplication.restoreOverrideCursor()
 
     def load_interface_data(self, widget):
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             if widget is self.dashboard_interface:
                 self.load_dashboard_data()
             elif widget is self.stations_interface:
-                stations = metro_service.get_stations_summary()
-                self.stations_interface.update_stations(stations)
+                self.stations_interface.load_all_data()
             elif widget is self.routes_interface:
                 self.routes_interface.load_all_data()
             elif widget is self.fleet_interface:
-                fleet = metro_service.get_fleet_summary()
-                self.fleet_interface.update_fleet(fleet)
+                self.fleet_interface.load_all_data()
             elif widget is self.staff_interface:
-                staff = metro_service.get_staff_summary()
-                self.staff_interface.update_staff(staff)
+                self.staff_interface.load_all_data()
             elif widget is self.cards_interface:
                 self.cards_interface.load_cards_data()
             elif widget is self.maintenance_interface:
@@ -267,9 +263,6 @@ class MetroFluentApp(FluentWindow):
                 msg_type="error",
                 duration=8000
             )
-        finally:
-            if QApplication.overrideCursor() is not None:
-                QApplication.restoreOverrideCursor()
 
     def load_all_data(self):
         """Sincroniza el dashboard y el módulo actualmente visible bajo demanda."""

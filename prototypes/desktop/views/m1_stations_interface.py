@@ -12,9 +12,11 @@ Implementa:
 8. Consultar todas las líneas que pasan por una estación.
 9. Consultar todas las estaciones de una línea en el orden correcto.
 """
+from typing import Optional, List, Dict, Any, Tuple
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QHeaderView,
-    QTableWidgetItem, QStackedWidget, QFrame, QColorDialog
+    QTableWidgetItem, QStackedWidget, QFrame, QColorDialog,
+    QApplication
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QIcon, QPixmap, QPainter
@@ -27,8 +29,10 @@ from qfluentwidgets import (
 )
 
 from services import m1_network_service as network_service
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
-    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns
+    StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
+    TablePaginationBar
 )
 
 
@@ -689,13 +693,46 @@ class StationsInterface(QWidget):
         super().__init__(parent=parent)
         self.setObjectName("stationsInterface")
 
-        self.selected_station_id = None
-        self.selected_line_id = None
-        self.estaciones_cache = []
-        self.lineas_cache = []
-
+        self.selected_station_id: Optional[int] = None
+        self.selected_line_id: Optional[int] = None
+        self.estaciones_cache: List[Dict[str, Any]] = []
+        self.lineas_cache: List[Dict[str, Any]] = []
+        self.tramos_cache: List[Dict[str, Any]] = []
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
         self.init_ui()
-        self.load_all_data()
+
+    def closeEvent(self, a0: Any):
+        for worker in list(self.active_workers.values()):
+            if worker.isRunning():
+                worker.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -792,6 +829,10 @@ class StationsInterface(QWidget):
         self.table_stations.setSelectionBehavior(TableWidget.SelectRows)
         self.table_stations.itemSelectionChanged.connect(self.on_station_row_selected)
         v_est_layout.addWidget(self.table_stations, stretch=5)
+
+        self.pagination_stations = TablePaginationBar(view_estaciones, default_page_size=50, item_label="estaciones")
+        self.pagination_stations.page_changed.connect(self._render_stations_page)
+        v_est_layout.addWidget(self.pagination_stations)
 
         # Inspector Inferior de la Estación Seleccionada
         card_est_inspector = CardWidget(view_estaciones)
@@ -931,6 +972,10 @@ class StationsInterface(QWidget):
         self.table_lines.itemSelectionChanged.connect(self.on_line_row_selected)
         v_lin_layout.addWidget(self.table_lines, stretch=4)
 
+        self.pagination_lines = TablePaginationBar(view_lineas, default_page_size=25, item_label="líneas")
+        self.pagination_lines.page_changed.connect(self._render_lines_page)
+        v_lin_layout.addWidget(self.pagination_lines)
+
         # Panel de Recorrido Secuencial de Paradas (Topología de Línea)
         card_topo = CardWidget(view_lineas)
         topo_layout = QVBoxLayout(card_topo)
@@ -968,6 +1013,10 @@ class StationsInterface(QWidget):
         self.table_line_stations.setSelectionBehavior(TableWidget.SelectRows)
         topo_layout.addWidget(self.table_line_stations)
 
+        self.pagination_line_stations = TablePaginationBar(card_topo, default_page_size=25, item_label="paradas")
+        self.pagination_line_stations.page_changed.connect(self._render_line_stations_page)
+        topo_layout.addWidget(self.pagination_line_stations)
+
         v_lin_layout.addWidget(card_topo, stretch=5)
         self.stack_master.addWidget(view_lineas)
         main_layout.addWidget(self.stack_master)
@@ -1000,17 +1049,38 @@ class StationsInterface(QWidget):
         self.refresh_lines()
 
     def refresh_stations(self):
-        """Refresca la tabla de estaciones respetando filtros."""
+        """Refresca la tabla de estaciones respetando filtros de manera asíncrona."""
         dist = self.combo_filtro_distrito.currentText()
         est = self.combo_filtro_estado.currentText()
         ada = self.chk_filtro_ada.isChecked()
         txt = self.search_est.text()
 
-        self.estaciones_cache = network_service.get_estaciones_completas(
-            filtro_texto=txt, distrito=dist, estado=est, solo_ada=ada
+        self.pagination_stations.set_loading(True)
+
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_stations.set_loading(False)
+            self.estaciones_cache = data
+            page_items = self.pagination_stations.set_data(data, reset_page=True)
+            self._render_stations_page(page_items)
+
+        def _on_error(err_msg: str):
+            self.pagination_stations.set_loading(False)
+            InfoBar.error("Error al Cargar Estaciones", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "stations",
+            network_service.get_estaciones_completas,
+            _on_success,
+            _on_error,
+            filtro_texto=txt,
+            distrito=dist,
+            estado=est,
+            solo_ada=ada
         )
-        self.table_stations.setRowCount(len(self.estaciones_cache))
-        for r, row in enumerate(self.estaciones_cache):
+
+    def _render_stations_page(self, page_items: List[Dict[str, Any]]):
+        self.table_stations.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_stations.setItem(r, 0, QTableWidgetItem(str(row.get("CODIGO", "-"))))
             self.table_stations.setItem(r, 1, QTableWidgetItem(str(row.get("NOMBRE", "-"))))
             self.table_stations.setItem(r, 2, QTableWidgetItem(str(row.get("DISTRITO", "-"))))
@@ -1030,14 +1100,35 @@ class StationsInterface(QWidget):
         auto_fit_table_columns(self.table_stations)
 
         # Re-seleccionar primera fila si existe
-        if self.estaciones_cache:
+        if page_items and self.table_stations.rowCount() > 0:
             self.table_stations.selectRow(0)
+        else:
+            self.clear_station_details()
 
     def refresh_lines(self):
-        """Refresca la tabla principal de líneas."""
-        self.lineas_cache = network_service.get_lineas_completas()
-        self.table_lines.setRowCount(len(self.lineas_cache))
-        for r, row in enumerate(self.lineas_cache):
+        """Refresca la tabla principal de líneas de manera asíncrona."""
+        self.pagination_lines.set_loading(True)
+
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_lines.set_loading(False)
+            self.lineas_cache = data
+            page_items = self.pagination_lines.set_data(data, reset_page=True)
+            self._render_lines_page(page_items)
+
+        def _on_error(err_msg: str):
+            self.pagination_lines.set_loading(False)
+            InfoBar.error("Error al Cargar Líneas", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "lines",
+            network_service.get_lineas_completas,
+            _on_success,
+            _on_error
+        )
+
+    def _render_lines_page(self, page_items: List[Dict[str, Any]]):
+        self.table_lines.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_lines.setItem(r, 0, QTableWidgetItem(str(row.get("CODIGO", "-"))))
             self.table_lines.setItem(r, 1, QTableWidgetItem(str(row.get("NOMBRE", "-"))))
 
@@ -1056,9 +1147,9 @@ class StationsInterface(QWidget):
 
         auto_fit_table_columns(self.table_lines)
 
-        if self.lineas_cache:
+        if page_items:
             if self.selected_line_id:
-                matching = [i for i, lin in enumerate(self.lineas_cache) if int(lin["ID_LINEA"]) == self.selected_line_id]
+                matching = [i for i, lin in enumerate(page_items) if int(lin.get("ID_LINEA", 0)) == self.selected_line_id]
                 if matching:
                     self.table_lines.selectRow(matching[0])
                 else:
@@ -1085,11 +1176,16 @@ class StationsInterface(QWidget):
         if not selected_items:
             return
         row = selected_items[0].row()
-        if row < len(self.estaciones_cache):
-            est = self.estaciones_cache[row]
-            self.selected_station_id = int(est["ID_ESTACION"])
-            self.lbl_insp_estacion.setText(f"Estación: {est.get('NOMBRE')} [{est.get('CODIGO')}] — Distrito: {est.get('DISTRITO')} | Estado: {est.get('ESTADO_OPERATIVO')}")
-            self.load_station_details(self.selected_station_id)
+        item_cod = self.table_stations.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        est = next((e for e in self.estaciones_cache if str(e.get("CODIGO")) == cod), None)
+        if not est:
+            return
+        self.selected_station_id = int(est["ID_ESTACION"])
+        self.lbl_insp_estacion.setText(f"Estación: {est.get('NOMBRE')} [{est.get('CODIGO')}] — Distrito: {est.get('DISTRITO')} | Estado: {est.get('ESTADO_OPERATIVO')}")
+        self.load_station_details(self.selected_station_id)
 
     def load_station_details(self, id_estacion: int):
         # 1. Plataformas
@@ -1140,17 +1236,42 @@ class StationsInterface(QWidget):
         if not selected_items:
             return
         row = selected_items[0].row()
-        if row < len(self.lineas_cache):
-            lin = self.lineas_cache[row]
-            self.selected_line_id = int(lin["ID_LINEA"])
-            self.lbl_topo_title.setText(f"Recorrido Secuencial de Paradas — Línea {lin.get('CODIGO')} ({lin.get('NOMBRE')})")
-            self.load_line_topology(self.selected_line_id)
+        item_cod = self.table_lines.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        lin = next((l for l in self.lineas_cache if str(l.get("CODIGO")) == cod), None)
+        if not lin:
+            return
+        self.selected_line_id = int(lin["ID_LINEA"])
+        self.lbl_topo_title.setText(f"Recorrido Secuencial de Paradas — Línea {lin.get('CODIGO')} ({lin.get('NOMBRE')})")
+        self.load_line_topology(self.selected_line_id)
 
     def load_line_topology(self, id_linea: int):
         """Requerimiento 9: Consultar todas las estaciones de una línea en el orden correcto."""
-        tramos = network_service.get_estaciones_de_linea_ordenadas(id_linea)
-        self.table_line_stations.setRowCount(len(tramos))
-        for r, t in enumerate(tramos):
+        self.pagination_line_stations.set_loading(True)
+
+        def _on_success(tramos: List[Dict[str, Any]]):
+            self.pagination_line_stations.set_loading(False)
+            self.tramos_cache = tramos
+            page_items = self.pagination_line_stations.set_data(tramos, reset_page=True)
+            self._render_line_stations_page(page_items)
+
+        def _on_error(err_msg: str):
+            self.pagination_line_stations.set_loading(False)
+            InfoBar.error("Error al Cargar Topología", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "topology",
+            network_service.get_estaciones_de_linea_ordenadas,
+            _on_success,
+            _on_error,
+            id_linea
+        )
+
+    def _render_line_stations_page(self, page_items: List[Dict[str, Any]]):
+        self.table_line_stations.setRowCount(len(page_items))
+        for r, t in enumerate(page_items):
             self.table_line_stations.setItem(r, 0, QTableWidgetItem(f"#{t.get('ORDEN')}"))
             self.table_line_stations.setItem(r, 1, QTableWidgetItem(str(t.get("CODIGO_ESTACION", "-"))))
             self.table_line_stations.setItem(r, 2, QTableWidgetItem(str(t.get("NOMBRE_ESTACION", "-"))))
@@ -1198,7 +1319,13 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona una estación de la tabla para modificar.", parent=self.window())
             return
         row = selected_items[0].row()
-        est_data = self.estaciones_cache[row]
+        item_cod = self.table_stations.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        est_data = next((e for e in self.estaciones_cache if str(e.get("CODIGO")) == cod), None)
+        if not est_data:
+            return
         dlg = EstacionDialog(estacion_data=est_data, parent=self.window())
         if dlg.exec():
             datos = dlg.get_data()
@@ -1225,7 +1352,13 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona una estación para alternar su estado.", parent=self.window())
             return
         row = selected_items[0].row()
-        est_data = self.estaciones_cache[row]
+        item_cod = self.table_stations.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        est_data = next((e for e in self.estaciones_cache if str(e.get("CODIGO")) == cod), None)
+        if not est_data:
+            return
         curr_estado = est_data.get("ESTADO_OPERATIVO")
         nuevo_estado = "Cerrada Temporalmente" if curr_estado == "Operativa" else "Operativa"
         res = network_service.cambiar_estado_estacion(int(est_data["ID_ESTACION"]), nuevo_estado)
@@ -1246,13 +1379,21 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona una estación en la tabla para dar de baja o eliminar.", parent=self.window())
             return
 
-        selected_rows = sorted(list(set(item.row() for item in selected_items)))
+        selected_codes = set()
+        for it in selected_items:
+            c_it = self.table_stations.item(it.row(), 0)
+            if c_it:
+                selected_codes.add(c_it.text())
+
+        selected_ests = [e for e in self.estaciones_cache if str(e.get("CODIGO")) in selected_codes]
+        if not selected_ests:
+            return
 
         # 1. Protección contra Eliminación Masiva en Cascada
-        if len(selected_rows) > 1:
+        if len(selected_ests) > 1:
             mb = MessageBox(
                 "Protección de Integridad Masiva",
-                f"Has seleccionado {len(selected_rows)} estaciones simultáneamente.\n\n"
+                f"Has seleccionado {len(selected_ests)} estaciones simultáneamente.\n\n"
                 "Por políticas de seguridad ferroviaria e integridad relacional, el sistema PROHÍBE "
                 "la eliminación física (Hard-Delete) masiva en cascada.\n\n"
                 "¿Deseas aplicar una Baja Operativa Segura (Soft-Delete: marcar como 'Cerrada') "
@@ -1262,10 +1403,7 @@ class StationsInterface(QWidget):
             mb.yesButton.setText("Confirmar Soft-Delete Masivo")
             mb.cancelButton.setText("Cancelar Operación")
             if mb.exec():
-                ids_a_bajar = []
-                for r in selected_rows:
-                    if r < len(self.estaciones_cache):
-                        ids_a_bajar.append(int(self.estaciones_cache[r]["ID_ESTACION"]))
+                ids_a_bajar = [int(e["ID_ESTACION"]) for e in selected_ests]
                 res = network_service.dar_de_baja_masiva_estaciones(ids_a_bajar)
                 if res.get("success"):
                     InfoBar.success("Baja Masiva Segura", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
@@ -1276,11 +1414,7 @@ class StationsInterface(QWidget):
             return
 
         # 2. Eliminación / Baja Individual con Verificación de Dependencias
-        row = selected_rows[0]
-        if row >= len(self.estaciones_cache):
-            return
-
-        est_data = self.estaciones_cache[row]
+        est_data = selected_ests[0]
         id_est = int(est_data["ID_ESTACION"])
         nombre = est_data.get("NOMBRE", "Estación")
         codigo = est_data.get("CODIGO", "")
@@ -1481,7 +1615,13 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona una línea para modificar.", parent=self.window())
             return
         row = selected_items[0].row()
-        linea_data = self.lineas_cache[row]
+        item_cod = self.table_lines.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        linea_data = next((l for l in self.lineas_cache if str(l.get("CODIGO")) == cod), None)
+        if not linea_data:
+            return
         dlg = LineaDialog(linea_data=linea_data, estaciones=self.estaciones_cache, parent=self.window())
         if dlg.exec():
             datos = dlg.get_data()
@@ -1498,7 +1638,13 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona una línea para cambiar su estado.", parent=self.window())
             return
         row = selected_items[0].row()
-        linea_data = self.lineas_cache[row]
+        item_cod = self.table_lines.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        linea_data = next((l for l in self.lineas_cache if str(l.get("CODIGO")) == cod), None)
+        if not linea_data:
+            return
         curr = linea_data.get("ESTADO_OPERATIVO")
         nuevo = "Suspendida" if curr == "Activa" else "Activa"
         res = network_service.cambiar_estado_linea(int(linea_data["ID_LINEA"]), nuevo)
@@ -1520,10 +1666,14 @@ class StationsInterface(QWidget):
             return
 
         row = selected_items[0].row()
-        if row >= len(self.lineas_cache):
+        item_cod = self.table_lines.item(row, 0)
+        if not item_cod:
+            return
+        cod = item_cod.text()
+        linea_data = next((l for l in self.lineas_cache if str(l.get("CODIGO")) == cod), None)
+        if not linea_data:
             return
 
-        linea_data = self.lineas_cache[row]
         id_lin = int(linea_data["ID_LINEA"])
         codigo = str(linea_data.get("CODIGO", ""))
         nombre = str(linea_data.get("NOMBRE", "Línea"))
@@ -1660,31 +1810,36 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona un tramo/estación de la tabla de recorrido.", parent=self.window())
             return
         row = selected_items[0].row()
-        tramos = network_service.get_estaciones_de_linea_ordenadas(self.selected_line_id)
-        if row < len(tramos):
-            tramo = tramos[row]
-            existing_orders = [int(s["ORDEN"]) for s in tramos if str(s.get("ORDEN", "")).isdigit()]
-            dlg = AsociarEstacionDialog(
-                tramo_data=tramo,
-                existing_orders=existing_orders,
-                parent=self.window()
+        item_ord = self.table_line_stations.item(row, 0)
+        if not item_ord:
+            return
+        ord_txt = item_ord.text()
+        tramos = self.tramos_cache if self.tramos_cache else network_service.get_estaciones_de_linea_ordenadas(self.selected_line_id)
+        tramo = next((s for s in tramos if f"#{s.get('ORDEN')}" == ord_txt), None)
+        if not tramo:
+            return
+        existing_orders = [int(s["ORDEN"]) for s in tramos if str(s.get("ORDEN", "")).isdigit()]
+        dlg = AsociarEstacionDialog(
+            tramo_data=tramo,
+            existing_orders=existing_orders,
+            parent=self.window()
+        )
+        if dlg.exec():
+            if not dlg.validate():
+                InfoBar.warning("Validación Fallida", "El orden seleccionado ya está asignado a otra estación en esta línea.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                return
+            d = dlg.get_data()
+            res = network_service.modificar_tramo_linea_estacion(
+                id_linea_estacion=int(tramo["ID_LINEA_ESTACION"]),
+                orden=d["orden"],
+                distancia_km=d["distancia_km"],
+                tiempo_min=d["tiempo_min"]
             )
-            if dlg.exec():
-                if not dlg.validate():
-                    InfoBar.warning("Validación Fallida", "El orden seleccionado ya está asignado a otra estación en esta línea.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
-                    return
-                d = dlg.get_data()
-                res = network_service.modificar_tramo_linea_estacion(
-                    id_linea_estacion=int(tramo["ID_LINEA_ESTACION"]),
-                    orden=d["orden"],
-                    distancia_km=d["distancia_km"],
-                    tiempo_min=d["tiempo_min"]
-                )
-                if res.get("success"):
-                    InfoBar.success("Tramo Actualizado", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
-                    self.load_line_topology(self.selected_line_id)
-                else:
-                    InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+            if res.get("success"):
+                InfoBar.success("Tramo Actualizado", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                self.load_line_topology(self.selected_line_id)
+            else:
+                InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
 
     def handle_desvincular_estacion(self):
         selected_items = self.table_line_stations.selectedItems()
@@ -1692,13 +1847,19 @@ class StationsInterface(QWidget):
             InfoBar.warning("Sin Selección", "Selecciona una estación del recorrido para desvincular.", parent=self.window())
             return
         row = selected_items[0].row()
-        tramos = network_service.get_estaciones_de_linea_ordenadas(self.selected_line_id)
-        if row < len(tramos):
-            tramo_id = int(tramos[row]["ID_LINEA_ESTACION"])
-            res = network_service.desvincular_estacion_linea(tramo_id)
-            if res.get("success"):
-                InfoBar.success("Estación Desvinculada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
-                self.load_line_topology(self.selected_line_id)
-                self.refresh_lines()
-            else:
-                InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+        item_ord = self.table_line_stations.item(row, 0)
+        if not item_ord:
+            return
+        ord_txt = item_ord.text()
+        tramos = self.tramos_cache if self.tramos_cache else network_service.get_estaciones_de_linea_ordenadas(self.selected_line_id)
+        tramo = next((s for s in tramos if f"#{s.get('ORDEN')}" == ord_txt), None)
+        if not tramo:
+            return
+        tramo_id = int(tramo["ID_LINEA_ESTACION"])
+        res = network_service.desvincular_estacion_linea(tramo_id)
+        if res.get("success"):
+            InfoBar.success("Estación Desvinculada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+            self.load_line_topology(self.selected_line_id)
+            self.refresh_lines()
+        else:
+            InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)

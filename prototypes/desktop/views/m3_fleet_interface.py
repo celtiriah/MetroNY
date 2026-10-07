@@ -11,12 +11,13 @@ Cumple estrictamente con los 8 requerimientos del enunciado y las reglas de nego
 8. Impedir el uso de trenes en mantenimiento o fuera de servicio (Regla 11 y TRG_TREN_MANTENIMIENTO_NO_ASIGNAR).
 """
 from datetime import datetime, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
-    QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout
+    QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
+    QApplication
 )
 
 from qfluentwidgets import (
@@ -28,9 +29,10 @@ from qfluentwidgets import (
 )
 
 from services import m3_fleet_service, actions_service
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
     StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
-    to_qdate, qdate_to_iso, create_calendar_picker
+    to_qdate, qdate_to_iso, create_calendar_picker, TablePaginationBar
 )
 
 
@@ -593,14 +595,49 @@ class FleetInterface(QWidget):
         super().__init__(parent=parent)
         self.setObjectName("fleetInterface")
 
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
         self.selected_tren_id: Optional[int] = None
         self.selected_tren_codigo: str = ""
         self.selected_vagon_id: Optional[int] = None
         self.trenes_cache: List[Dict[str, Any]] = []
         self.vagones_cache: List[Dict[str, Any]] = []
+        self.historial_cache: List[Dict[str, Any]] = []
+        self.viajes_flota_cache: List[Dict[str, Any]] = []
 
         self.init_ui()
-        self.load_all_data()
+
+    def closeEvent(self, a0: Any):
+        for worker in list(self.active_workers.values()):
+            if worker.isRunning():
+                worker.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -723,6 +760,10 @@ class FleetInterface(QWidget):
         self.table_trenes.itemSelectionChanged.connect(self.on_tren_selected)
         v_layout.addWidget(self.table_trenes, stretch=4)
 
+        self.pagination_trenes = TablePaginationBar(tab_widget, default_page_size=50, item_label="trenes")
+        self.pagination_trenes.page_changed.connect(self._render_trenes_page)
+        v_layout.addWidget(self.pagination_trenes)
+
         # Panel Inferior: Composición Activa del Tren Seleccionado (TREN_VAGON)
         card_comp = CardWidget(tab_widget)
         comp_layout = QVBoxLayout(card_comp)
@@ -829,6 +870,10 @@ class FleetInterface(QWidget):
         self.table_vagones.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_vagones)
 
+        self.pagination_vagones = TablePaginationBar(tab_widget, default_page_size=50, item_label="vagones")
+        self.pagination_vagones.page_changed.connect(self._render_vagones_page)
+        v_layout.addWidget(self.pagination_vagones)
+
         self.stack_views.addWidget(tab_widget)
 
     # ==========================================================================
@@ -878,6 +923,10 @@ class FleetInterface(QWidget):
         self.table_historial.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_historial.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_historial)
+
+        self.pagination_historial = TablePaginationBar(tab_widget, default_page_size=50, item_label="registros de historial")
+        self.pagination_historial.page_changed.connect(self._render_historial_page)
+        v_layout.addWidget(self.pagination_historial)
 
         self.stack_views.addWidget(tab_widget)
 
@@ -969,6 +1018,10 @@ class FleetInterface(QWidget):
         self.table_viajes_flota.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         viajes_layout.addWidget(self.table_viajes_flota)
 
+        self.pagination_viajes_flota = TablePaginationBar(card_viajes, default_page_size=50, item_label="viajes")
+        self.pagination_viajes_flota.page_changed.connect(self._render_viajes_flota_page)
+        viajes_layout.addWidget(self.pagination_viajes_flota)
+
         v_layout.addWidget(card_viajes, stretch=4)
         self.stack_views.addWidget(tab_widget)
 
@@ -1030,11 +1083,25 @@ class FleetInterface(QWidget):
     def refresh_trenes(self):
         estado = self.combo_filtro_estado.currentText()
         deposito_id = self.combo_filtro_deposito.currentData()
-        self.trenes_cache = m3_fleet_service.get_trenes(
+        self.pagination_trenes.set_loading(True)
+
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_trenes.set_loading(False)
+            self.trenes_cache = data
+            self.apply_trenes_filter()
+
+        def _on_error(err_msg: str):
+            self.pagination_trenes.set_loading(False)
+            InfoBar.error("Error al Cargar Trenes", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "trenes",
+            m3_fleet_service.get_trenes,
+            _on_success,
+            _on_error,
             estado_filter=estado if estado != "(Todos)" else None,
             deposito_id=deposito_id
         )
-        self.apply_trenes_filter()
 
     def apply_trenes_filter(self):
         txt = self.search_trenes.text().strip().lower()
@@ -1047,8 +1114,12 @@ class FleetInterface(QWidget):
                    txt in str(t.get("FABRICANTE", "")).lower()
             ]
 
-        self.table_trenes.setRowCount(len(filtered))
-        for r, row in enumerate(filtered):
+        page_items = self.pagination_trenes.set_data(filtered, reset_page=True)
+        self._render_trenes_page(page_items)
+
+    def _render_trenes_page(self, page_items: List[Dict[str, Any]]):
+        self.table_trenes.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_trenes.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("CODIGO_INTERNO"))))
             self.table_trenes.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NOMBRE_MODELO"))))
             self.table_trenes.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("FABRICANTE"))))
@@ -1073,7 +1144,7 @@ class FleetInterface(QWidget):
 
         auto_fit_table_columns(self.table_trenes)
 
-        if filtered and self.table_trenes.rowCount() > 0:
+        if page_items and self.table_trenes.rowCount() > 0:
             self.table_trenes.selectRow(0)
         else:
             self.table_composicion.setRowCount(0)
@@ -1461,11 +1532,25 @@ class FleetInterface(QWidget):
     def refresh_vagones(self):
         est = self.combo_vag_estado.currentText()
         tip = self.combo_vag_tipo.currentText()
-        self.vagones_cache = m3_fleet_service.get_vagones(
+        self.pagination_vagones.set_loading(True)
+
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_vagones.set_loading(False)
+            self.vagones_cache = data
+            self.apply_vagones_filter()
+
+        def _on_error(err_msg: str):
+            self.pagination_vagones.set_loading(False)
+            InfoBar.error("Error al Cargar Vagones", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "vagones",
+            m3_fleet_service.get_vagones,
+            _on_success,
+            _on_error,
             estado_filter=est if est != "(Todos)" else None,
             tipo_filter=tip if tip != "(Todos)" else None
         )
-        self.apply_vagones_filter()
 
     def apply_vagones_filter(self):
         txt = self.search_vagones.text().strip().lower()
@@ -1477,8 +1562,12 @@ class FleetInterface(QWidget):
                    txt in str(v.get("TIPO_VAGON", "")).lower()
             ]
 
-        self.table_vagones.setRowCount(len(filtered))
-        for r, row in enumerate(filtered):
+        page_items = self.pagination_vagones.set_data(filtered, reset_page=True)
+        self._render_vagones_page(page_items)
+
+    def _render_vagones_page(self, page_items: List[Dict[str, Any]]):
+        self.table_vagones.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_vagones.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_SERIE"))))
             
             tipo_v = _safe_str(row.get("TIPO_VAGON"))
@@ -1707,10 +1796,31 @@ class FleetInterface(QWidget):
         if est_filtro == "(Todos)":
             est_filtro = None
 
-        hist = m3_fleet_service.get_historial_composicion(tren_id=tren_id, estado_filtro=est_filtro)
-        self.table_historial.setRowCount(len(hist))
+        self.pagination_historial.set_loading(True)
 
-        for r, row in enumerate(hist):
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_historial.set_loading(False)
+            self.historial_cache = data
+            page_items = self.pagination_historial.set_data(data, reset_page=True)
+            self._render_historial_page(page_items)
+
+        def _on_error(err_msg: str):
+            self.pagination_historial.set_loading(False)
+            InfoBar.error("Error al Cargar Historial", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "historial",
+            m3_fleet_service.get_historial_composicion,
+            _on_success,
+            _on_error,
+            tren_id=tren_id,
+            estado_filtro=est_filtro
+        )
+
+    def _render_historial_page(self, page_items: List[Dict[str, Any]]):
+        self.table_historial.setRowCount(len(page_items))
+
+        for r, row in enumerate(page_items):
             self.table_historial.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("ID_TREN_VAGON"))))
             self.table_historial.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("CODIGO_TREN"))))
             self.table_historial.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("NUMERO_VAGON"))))
@@ -1784,10 +1894,29 @@ class FleetInterface(QWidget):
         )
 
     def refresh_viajes_flota(self):
-        viajes = m3_fleet_service.get_viajes_asignados_tren()
-        self.table_viajes_flota.setRowCount(len(viajes))
+        self.pagination_viajes_flota.set_loading(True)
 
-        for r, row in enumerate(viajes):
+        def _on_success(data: List[Dict[str, Any]]):
+            self.pagination_viajes_flota.set_loading(False)
+            self.viajes_flota_cache = data
+            page_items = self.pagination_viajes_flota.set_data(data, reset_page=True)
+            self._render_viajes_flota_page(page_items)
+
+        def _on_error(err_msg: str):
+            self.pagination_viajes_flota.set_loading(False)
+            InfoBar.error("Error al Cargar Viajes", err_msg, parent=self.window(), duration=4000)
+
+        self.run_async_fetch(
+            "viajes_flota",
+            m3_fleet_service.get_viajes_asignados_tren,
+            _on_success,
+            _on_error
+        )
+
+    def _render_viajes_flota_page(self, page_items: List[Dict[str, Any]]):
+        self.table_viajes_flota.setRowCount(len(page_items))
+
+        for r, row in enumerate(page_items):
             self.table_viajes_flota.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_VIAJE"))))
             self.table_viajes_flota.setItem(r, 1, QTableWidgetItem(f"Ruta {_safe_str(row.get('CODIGO_RUTA'))}"))
             lin_cod = _safe_str(row.get('CODIGO_LINEA'))
@@ -1822,7 +1951,7 @@ class FleetInterface(QWidget):
             return
 
         num_viaje = item_num.text()
-        viajes = m3_fleet_service.get_viajes_asignados_tren()
+        viajes = self.viajes_flota_cache if self.viajes_flota_cache else m3_fleet_service.get_viajes_asignados_tren()
         viaje = next((v for v in viajes if v.get("NUMERO_VIAJE") == num_viaje), None)
         if not viaje:
             return
@@ -1871,7 +2000,7 @@ class FleetInterface(QWidget):
             return
 
         num_viaje = item_num.text()
-        viajes = m3_fleet_service.get_viajes_asignados_tren()
+        viajes = self.viajes_flota_cache if self.viajes_flota_cache else m3_fleet_service.get_viajes_asignados_tren()
         viaje = next((v for v in viajes if v.get("NUMERO_VIAJE") == num_viaje), None)
         if not viaje:
             return

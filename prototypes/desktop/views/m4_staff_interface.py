@@ -11,12 +11,13 @@ Cumple estrictamente con los 8 requerimientos del enunciado y las reglas de nego
 8. Registrar ausencias y gestionar sustituciones de personal operativo.
 """
 from datetime import datetime, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
-    QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout
+    QHeaderView, QFormLayout, QTableWidgetItem, QGridLayout,
+    QApplication
 )
 
 from qfluentwidgets import (
@@ -28,11 +29,12 @@ from qfluentwidgets import (
 )
 
 from services import m4_staff_service
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
     StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
     to_qdate, qdate_to_iso, create_calendar_picker,
     to_qtime, qtime_to_str, create_time_picker,
-    RecordCalendarPicker
+    RecordCalendarPicker, TablePaginationBar
 )
 
 
@@ -728,12 +730,47 @@ class StaffInterface(QWidget):
 
         self.selected_empleado_id: Optional[int] = None
         self.selected_empleado_nombre: str = ""
+        self.highlight_empleado_id: Optional[int] = None
+        self.highlight_turno_id: Optional[int] = None
+        self.highlight_viaje_id: Optional[int] = None
         self.empleados_cache: List[Dict[str, Any]] = []
         self.certificaciones_cache: List[Dict[str, Any]] = []
         self.turnos_cache: List[Dict[str, Any]] = []
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
 
         self.init_ui()
-        self.load_all_data()
+
+    def closeEvent(self, a0: Any):
+        for w in list(self.active_workers.values()):
+            if w.isRunning():
+                w.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -848,6 +885,10 @@ class StaffInterface(QWidget):
         self.table_empleados.itemSelectionChanged.connect(self.on_empleado_selected)
         v_layout.addWidget(self.table_empleados, stretch=4)
 
+        self.pagination_empleados = TablePaginationBar(tab_widget, default_page_size=50, item_label="empleados")
+        self.pagination_empleados.page_changed.connect(self._render_empleados_page)
+        v_layout.addWidget(self.pagination_empleados)
+
         # Panel Inferior: Historial de Actividades Operativas y Jerarquía
         card_bottom = CardWidget(tab_widget)
         bottom_layout = QVBoxLayout(card_bottom)
@@ -959,6 +1000,10 @@ class StaffInterface(QWidget):
         self.table_certificaciones.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_certificaciones)
 
+        self.pagination_certificaciones = TablePaginationBar(tab_widget, default_page_size=50, item_label="certificaciones")
+        self.pagination_certificaciones.page_changed.connect(self._render_certificaciones_page)
+        v_layout.addWidget(self.pagination_certificaciones)
+
         self.stack_views.addWidget(tab_widget)
 
     # ==========================================================================
@@ -1050,6 +1095,10 @@ class StaffInterface(QWidget):
         self.table_turnos.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         v_layout.addWidget(self.table_turnos)
 
+        self.pagination_turnos = TablePaginationBar(tab_widget, default_page_size=50, item_label="turnos")
+        self.pagination_turnos.page_changed.connect(self._render_turnos_page)
+        v_layout.addWidget(self.pagination_turnos)
+
         self.stack_views.addWidget(tab_widget)
 
     # ==========================================================================
@@ -1118,6 +1167,10 @@ class StaffInterface(QWidget):
         self.table_viajes_staff.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table_viajes_staff.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         viajes_layout.addWidget(self.table_viajes_staff)
+
+        self.pagination_viajes_staff = TablePaginationBar(card_viajes, default_page_size=50, item_label="viajes")
+        self.pagination_viajes_staff.page_changed.connect(self._render_viajes_staff_page)
+        viajes_layout.addWidget(self.pagination_viajes_staff)
 
         v_layout.addWidget(card_viajes, stretch=4)
         self.stack_views.addWidget(tab_widget)
@@ -1189,11 +1242,32 @@ class StaffInterface(QWidget):
     def refresh_empleados(self):
         cargo = self.combo_filtro_cargo.currentText()
         estado = self.combo_filtro_estado_lab.currentText()
-        self.empleados_cache = m4_staff_service.get_empleados(
-            cargo_filter=cargo if cargo != "(Todos)" else None,
-            estado_filter=estado if estado != "(Todos)" else None
-        )
-        self.apply_empleados_filter()
+        cargo_param = cargo if cargo != "(Todos)" else None
+        estado_param = estado if estado != "(Todos)" else None
+
+        self.pagination_empleados.set_loading(True, "Cargando directorio de empleados...")
+
+        def _fetch():
+            return m4_staff_service.get_empleados(
+                cargo_filter=cargo_param,
+                estado_filter=estado_param
+            )
+
+        def _on_loaded(data: List[Dict[str, Any]]):
+            self.pagination_empleados.set_loading(False)
+            self.empleados_cache = data or []
+            self.apply_empleados_filter()
+
+        def _on_error(err: str):
+            self.pagination_empleados.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Empleados",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("empleados", _fetch, _on_loaded, _on_error)
 
     def apply_empleados_filter(self):
         txt = self.search_empleados.text().strip().lower()
@@ -1207,9 +1281,13 @@ class StaffInterface(QWidget):
                    txt in str(e.get("CARGO", "")).lower()
             ]
 
+        page_items = self.pagination_empleados.set_data(filtered, reset_page=True)
+        self._render_empleados_page(page_items)
+
+    def _render_empleados_page(self, page_items: List[Dict[str, Any]]):
         self.table_empleados.clearContents()
-        self.table_empleados.setRowCount(len(filtered))
-        for r, row in enumerate(filtered):
+        self.table_empleados.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             self.table_empleados.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_EMPLEADO"))))
             self.table_empleados.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NOMBRE_COMPLETO"))))
             self.table_empleados.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("CARGO"))))
@@ -1230,7 +1308,7 @@ class StaffInterface(QWidget):
 
         auto_fit_table_columns(self.table_empleados)
 
-        if filtered and self.table_empleados.rowCount() > 0:
+        if page_items and self.table_empleados.rowCount() > 0:
             self.table_empleados.selectRow(0)
         else:
             self.table_subordinados.setRowCount(0)
@@ -1468,14 +1546,38 @@ class StaffInterface(QWidget):
     def refresh_certificaciones(self):
         estado = self.combo_filtro_cert_est.currentText()
         emp_id = self.combo_filtro_cert_emp.currentData()
-        self.certificaciones_cache = m4_staff_service.get_certificaciones(
-            empleado_id=emp_id,
-            estado_filter=estado if estado != "(Todos)" else None
-        )
-        self.table_certificaciones.clearContents()
-        self.table_certificaciones.setRowCount(len(self.certificaciones_cache))
+        est_param = estado if estado != "(Todos)" else None
 
-        for r, row in enumerate(self.certificaciones_cache):
+        self.pagination_certificaciones.set_loading(True, "Cargando certificaciones...")
+
+        def _fetch():
+            return m4_staff_service.get_certificaciones(
+                empleado_id=emp_id,
+                estado_filter=est_param
+            )
+
+        def _on_loaded(data: List[Dict[str, Any]]):
+            self.pagination_certificaciones.set_loading(False)
+            self.certificaciones_cache = data or []
+            page_items = self.pagination_certificaciones.set_data(self.certificaciones_cache, reset_page=True)
+            self._render_certificaciones_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_certificaciones.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Certificaciones",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("certificaciones", _fetch, _on_loaded, _on_error)
+
+    def _render_certificaciones_page(self, page_items: List[Dict[str, Any]]):
+        self.table_certificaciones.clearContents()
+        self.table_certificaciones.setRowCount(len(page_items))
+
+        for r, row in enumerate(page_items):
             self.table_certificaciones.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("ID_CERTIFICACION"))))
             self.table_certificaciones.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NUMERO_EMPLEADO"))))
             self.table_certificaciones.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("NOMBRE_EMPLEADO"))))
@@ -1616,24 +1718,51 @@ class StaffInterface(QWidget):
         emp_id = self.combo_filtro_turno_emp.currentData() if hasattr(self, "combo_filtro_turno_emp") else None
         tiempo = self.combo_filtro_turno_tiempo.currentText() if hasattr(self, "combo_filtro_turno_tiempo") else None
 
-        fechas_disp = m4_staff_service.get_fechas_turnos_registrados()
-        if hasattr(self, "picker_filtro_turno_fecha"):
-            self.picker_filtro_turno_fecha.set_available_dates(fechas_disp)
-
         qd = self.picker_filtro_turno_fecha.getDate() if hasattr(self, "picker_filtro_turno_fecha") else QDate()
         fecha_filtro = qdate_to_iso(qd) if qd.isValid() else None
 
-        self.turnos_cache = m4_staff_service.get_turnos(
-            fecha=fecha_filtro,
-            empleado_id=emp_id,
-            tipo_lugar=lugar if lugar != "(Todos)" else None,
-            estado_asistencia=asist if asist != "(Todos)" else None,
-            filtro_tiempo=tiempo if (tiempo != "(Todos)" and not fecha_filtro) else None
-        )
-        self.table_turnos.clearContents()
-        self.table_turnos.setRowCount(len(self.turnos_cache))
+        lugar_param = lugar if lugar != "(Todos)" else None
+        asist_param = asist if asist != "(Todos)" else None
+        tiempo_param = tiempo if (tiempo != "(Todos)" and not fecha_filtro) else None
 
-        for r, row in enumerate(self.turnos_cache):
+        self.pagination_turnos.set_loading(True, "Cargando programación de turnos...")
+
+        def _fetch():
+            fechas_disp = m4_staff_service.get_fechas_turnos_registrados()
+            turnos = m4_staff_service.get_turnos(
+                fecha=fecha_filtro,
+                empleado_id=emp_id,
+                tipo_lugar=lugar_param,
+                estado_asistencia=asist_param,
+                filtro_tiempo=tiempo_param
+            )
+            return fechas_disp, turnos
+
+        def _on_loaded(data: Tuple[List[str], List[Dict[str, Any]]]):
+            self.pagination_turnos.set_loading(False)
+            fechas_disp, turnos = data
+            if hasattr(self, "picker_filtro_turno_fecha"):
+                self.picker_filtro_turno_fecha.set_available_dates(fechas_disp)
+            self.turnos_cache = turnos or []
+            page_items = self.pagination_turnos.set_data(self.turnos_cache, reset_page=True)
+            self._render_turnos_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_turnos.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Turnos",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("turnos", _fetch, _on_loaded, _on_error)
+
+    def _render_turnos_page(self, page_items: List[Dict[str, Any]]):
+        self.table_turnos.clearContents()
+        self.table_turnos.setRowCount(len(page_items))
+
+        for r, row in enumerate(page_items):
             self.table_turnos.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("CODIGO_TURNO"))))
             self.table_turnos.setItem(r, 1, QTableWidgetItem(_safe_str(row.get("NUMERO_EMPLEADO"))))
             self.table_turnos.setItem(r, 2, QTableWidgetItem(_safe_str(row.get("NOMBRE_EMPLEADO"))))
@@ -1854,11 +1983,33 @@ class StaffInterface(QWidget):
     # ==========================================================================
 
     def refresh_viajes_staff(self):
-        viajes = m4_staff_service.get_viajes_personal()
-        self.table_viajes_staff.clearContents()
-        self.table_viajes_staff.setRowCount(len(viajes))
+        self.pagination_viajes_staff.set_loading(True, "Cargando viajes y personal...")
 
-        for r, row in enumerate(viajes):
+        def _fetch():
+            return m4_staff_service.get_viajes_personal()
+
+        def _on_loaded(data: List[Dict[str, Any]]):
+            self.pagination_viajes_staff.set_loading(False)
+            self.viajes_staff_cache = data or []
+            page_items = self.pagination_viajes_staff.set_data(self.viajes_staff_cache, reset_page=True)
+            self._render_viajes_staff_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_viajes_staff.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Viajes",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("viajes_staff", _fetch, _on_loaded, _on_error)
+
+    def _render_viajes_staff_page(self, page_items: List[Dict[str, Any]]):
+        self.table_viajes_staff.clearContents()
+        self.table_viajes_staff.setRowCount(len(page_items))
+
+        for r, row in enumerate(page_items):
             self.table_viajes_staff.setItem(r, 0, QTableWidgetItem(_safe_str(row.get("NUMERO_VIAJE"))))
             self.table_viajes_staff.setItem(r, 1, QTableWidgetItem(f"Ruta {_safe_str(row.get('CODIGO_RUTA'))}"))
             lin_cod = _safe_str(row.get('CODIGO_LINEA'))
@@ -1897,7 +2048,7 @@ class StaffInterface(QWidget):
             return
 
         num_viaje = item_num.text()
-        viajes = m4_staff_service.get_viajes_personal()
+        viajes = getattr(self, "viajes_staff_cache", []) or m4_staff_service.get_viajes_personal()
         viaje = next((v for v in viajes if v.get("NUMERO_VIAJE") == num_viaje), None)
         if not viaje:
             return
@@ -1946,7 +2097,7 @@ class StaffInterface(QWidget):
             return
 
         num_viaje = item_num.text()
-        viajes = m4_staff_service.get_viajes_personal()
+        viajes = getattr(self, "viajes_staff_cache", []) or m4_staff_service.get_viajes_personal()
         viaje = next((v for v in viajes if v.get("NUMERO_VIAJE") == num_viaje), None)
         if not viaje:
             return

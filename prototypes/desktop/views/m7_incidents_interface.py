@@ -29,9 +29,11 @@ from qfluentwidgets import (
 )
 
 from services import m7_incidents_service, actions_service
+from workers.generic_worker import GenericDataLoaderWorker
 from views.components import (
     StatusBadge, LineColorChip, configure_interactive_table, auto_fit_table_columns,
-    to_qdate, qdate_to_iso, create_calendar_picker, create_time_picker
+    to_qdate, qdate_to_iso, create_calendar_picker, create_time_picker,
+    TablePaginationBar
 )
 
 
@@ -441,9 +443,45 @@ class IncidentsInterface(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("incidentsInterface")
+        self.active_workers: Dict[str, GenericDataLoaderWorker] = {}
         self.incidents_cache: List[Dict[str, Any]] = []
+        self.bitacora_cache: List[Dict[str, Any]] = []
+        self.viajes_afectados_cache: List[Dict[str, Any]] = []
         self.selected_incident_id: Optional[int] = None
         self.init_ui()
+
+    def closeEvent(self, a0: Any):
+        for worker in list(self.active_workers.values()):
+            if worker.isRunning():
+                worker.blockSignals(True)
+        self.active_workers.clear()
+        super().closeEvent(a0)
+
+    def run_async_fetch(
+        self,
+        task_key: str,
+        fetch_fn: Any,
+        on_success: Any,
+        on_error: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any
+    ):
+        if task_key in self.active_workers:
+            old_w = self.active_workers[task_key]
+            if old_w.isRunning():
+                old_w.blockSignals(True)
+
+        worker = GenericDataLoaderWorker(fetch_fn, *args, parent=self, **kwargs)
+        self.active_workers[task_key] = worker
+        worker.data_loaded.connect(on_success)
+        if on_error:
+            worker.error_occurred.connect(on_error)
+
+        def _cleanup() -> None:
+            self.active_workers.pop(task_key, None)
+
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -601,6 +639,10 @@ class IncidentsInterface(QWidget):
         self.table_incidentes.itemSelectionChanged.connect(self.on_incidente_selected)
         v_layout.addWidget(self.table_incidentes, stretch=1)
 
+        self.pagination_incidentes = TablePaginationBar(tab_widget, default_page_size=50, item_label="incidentes")
+        self.pagination_incidentes.page_changed.connect(self._render_incidentes_page)
+        v_layout.addWidget(self.pagination_incidentes)
+
         self.stack_views.addWidget(tab_widget)
 
     def refresh_incidentes(self):
@@ -608,15 +650,45 @@ class IncidentsInterface(QWidget):
         sev = self.combo_filtro_sev.currentText()
         st = self.search_inc.text().strip()
 
-        self.incidents_cache = m7_incidents_service.get_incidentes(
-            estado_filter=est if est != "(Todos)" else None,
-            severidad_filter=sev if sev != "(Todas)" else None,
-            search_text=st if st else None
-        )
+        est_param = est if est != "(Todos)" else None
+        sev_param = sev if sev != "(Todas)" else None
+        st_param = st if st else None
 
+        self.pagination_incidentes.set_loading(True, "Cargando incidentes...")
+
+        def _fetch():
+            incidentes = m7_incidents_service.get_incidentes(
+                estado_filter=est_param,
+                severidad_filter=sev_param,
+                search_text=st_param
+            )
+            kpis = m7_incidents_service.get_kpis_incidentes()
+            return incidentes, kpis
+
+        def _on_loaded(data: Tuple[List[Dict[str, Any]], Dict[str, Any]]):
+            self.pagination_incidentes.set_loading(False)
+            incidentes, kpis = data
+            self.incidents_cache = incidentes or []
+            self._update_kpis_display(kpis)
+            page_items = self.pagination_incidentes.set_data(self.incidents_cache, reset_page=True)
+            self._render_incidentes_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_incidentes.set_loading(False)
+            InfoBar.error(
+                title="Error al Cargar Incidentes",
+                content=err,
+                parent=self.window(),
+                duration=4000
+            )
+
+        self.run_async_fetch("incidentes", _fetch, _on_loaded, _on_error)
+
+    def _render_incidentes_page(self, page_items: List[Dict[str, Any]]):
         self.table_incidentes.blockSignals(True)
-        self.table_incidentes.setRowCount(len(self.incidents_cache))
-        for r, row in enumerate(self.incidents_cache):
+        self.table_incidentes.clearContents()
+        self.table_incidentes.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             num = _safe_str(row.get("NUMERO_INCIDENTE"))
             tipo = _safe_str(row.get("TIPO"))
             sev_val = _safe_str(row.get("NIVEL_SEVERIDAD"))
@@ -645,24 +717,30 @@ class IncidentsInterface(QWidget):
 
         self.table_incidentes.blockSignals(False)
         auto_fit_table_columns(self.table_incidentes)
-        self.refresh_kpis()
+
+    def _update_kpis_display(self, kpis: Dict[str, Any]):
+        self.lbl_kpi_activos.setText(f"Incidentes Activos: {kpis.get('activos', 0)}")
+        self.lbl_kpi_en_atencion.setText(f"En Atención: {kpis.get('en_atencion', 0)}")
+        self.lbl_kpi_criticos.setText(f"Críticos / Altos: {kpis.get('criticos_altos', 0)}")
+        self.lbl_kpi_pasajeros.setText(f"Pasajeros Afectados: {kpis.get('pasajeros_afectados', 0):,}")
+        self.lbl_kpi_cancelados.setText(f"Viajes Cancelados: {kpis.get('viajes_cancelados', 0)}")
 
     def refresh_kpis(self):
         kpis = m7_incidents_service.get_kpis_incidentes()
-        self.lbl_kpi_activos.setText(f"Incidentes Activos: {kpis['activos']}")
-        self.lbl_kpi_en_atencion.setText(f"En Atención: {kpis['en_atencion']}")
-        self.lbl_kpi_criticos.setText(f"Críticos / Altos: {kpis['criticos_altos']}")
-        self.lbl_kpi_pasajeros.setText(f"Pasajeros Afectados: {kpis['pasajeros_afectados']:,}")
-        self.lbl_kpi_cancelados.setText(f"Viajes Cancelados: {kpis['viajes_cancelados']}")
+        self._update_kpis_display(kpis)
 
     def on_incidente_selected(self):
         selected = self.table_incidentes.selectedItems()
         if selected:
             r = selected[0].row()
-            if r < len(self.incidents_cache):
-                self.selected_incident_id = _safe_int(self.incidents_cache[r].get("ID_INCIDENTE"))
-        else:
-            self.selected_incident_id = None
+            num_item = self.table_incidentes.item(r, 0)
+            if num_item:
+                num = num_item.text()
+                inc = next((i for i in self.incidents_cache if str(i.get("NUMERO_INCIDENTE")) == num), None)
+                if inc:
+                    self.selected_incident_id = _safe_int(inc.get("ID_INCIDENTE"))
+                    return
+        self.selected_incident_id = None
 
     def handle_nuevo_incidente(self):
         dialog = RegistrarIncidenteDialog(self.window())
@@ -995,6 +1073,11 @@ class IncidentsInterface(QWidget):
         configure_interactive_table(self.table_viajes_afectados)
 
         info_layout.addWidget(self.table_viajes_afectados, stretch=1)
+
+        self.pagination_viajes_afectados = TablePaginationBar(card_info, default_page_size=25, item_label="viajes afectados")
+        self.pagination_viajes_afectados.page_changed.connect(self._render_viajes_afectados_page)
+        info_layout.addWidget(self.pagination_viajes_afectados)
+
         v_layout.addWidget(card_info, stretch=1)
 
         self.stack_views.addWidget(tab_widget)
@@ -1025,14 +1108,34 @@ class IncidentsInterface(QWidget):
     def on_despacho_inc_changed(self):
         id_inc = self.combo_despacho_inc.currentData()
         if not id_inc:
+            self.table_viajes_afectados.clearContents()
             self.table_viajes_afectados.setRowCount(0)
             self.lbl_despacho_summary.setText("Sin incidente seleccionado.")
             return
 
-        viajes = m7_incidents_service.get_viajes_potencialmente_afectados(int(id_inc))
+        self.pagination_viajes_afectados.set_loading(True, "Cargando viajes afectados...")
+
+        def _fetch():
+            return m7_incidents_service.get_viajes_potencialmente_afectados(int(id_inc))
+
+        def _on_loaded(viajes: List[Dict[str, Any]]):
+            self.pagination_viajes_afectados.set_loading(False)
+            self.viajes_afectados_cache = viajes or []
+            self.lbl_despacho_summary.setText(f"Se identificaron {len(self.viajes_afectados_cache)} viaje(s) que intersectan con el sector afectado.")
+            page_items = self.pagination_viajes_afectados.set_data(self.viajes_afectados_cache, reset_page=True)
+            self._render_viajes_afectados_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_viajes_afectados.set_loading(False)
+            InfoBar.error(title="Error al Cargar Viajes", content=err, parent=self.window(), duration=4000)
+
+        self.run_async_fetch("viajes_afectados", _fetch, _on_loaded, _on_error)
+
+    def _render_viajes_afectados_page(self, page_items: List[Dict[str, Any]]):
         self.table_viajes_afectados.blockSignals(True)
-        self.table_viajes_afectados.setRowCount(len(viajes))
-        for r, row in enumerate(viajes):
+        self.table_viajes_afectados.clearContents()
+        self.table_viajes_afectados.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             num_v = _safe_str(row.get("NUMERO_VIAJE"))
             lin_cod = _safe_str(row.get('LINEA_CODIGO'))
             lin_col = _safe_str(row.get('COLOR_HEX') or row.get('COLOR_LINEA') or '#0039A6')
@@ -1054,7 +1157,6 @@ class IncidentsInterface(QWidget):
 
         self.table_viajes_afectados.blockSignals(False)
         auto_fit_table_columns(self.table_viajes_afectados)
-        self.lbl_despacho_summary.setText(f"Se identificaron {len(viajes)} viaje(s) que intersectan con el sector afectado.")
 
     def handle_ejecutar_cancelacion(self):
         id_inc = self.combo_despacho_inc.currentData()
@@ -1113,15 +1215,39 @@ class IncidentsInterface(QWidget):
         configure_interactive_table(self.table_bitacora)
 
         v_layout.addWidget(self.table_bitacora, stretch=1)
+
+        self.pagination_bitacora = TablePaginationBar(tab_widget, default_page_size=50, item_label="registros de auditoría")
+        self.pagination_bitacora.page_changed.connect(self._render_bitacora_page)
+        v_layout.addWidget(self.pagination_bitacora)
+
         self.stack_views.addWidget(tab_widget)
 
     def refresh_bitacora_view(self):
         st = self.search_bitacora.text().strip()
-        rows = m7_incidents_service.get_bitacora_incidentes(st if st else None)
+        st_param = st if st else None
 
+        self.pagination_bitacora.set_loading(True, "Cargando bitácora de auditoría...")
+
+        def _fetch():
+            return m7_incidents_service.get_bitacora_incidentes(st_param)
+
+        def _on_loaded(rows: List[Dict[str, Any]]):
+            self.pagination_bitacora.set_loading(False)
+            self.bitacora_cache = rows or []
+            page_items = self.pagination_bitacora.set_data(self.bitacora_cache, reset_page=True)
+            self._render_bitacora_page(page_items)
+
+        def _on_error(err: str):
+            self.pagination_bitacora.set_loading(False)
+            InfoBar.error(title="Error al Cargar Bitácora", content=err, parent=self.window(), duration=4000)
+
+        self.run_async_fetch("bitacora", _fetch, _on_loaded, _on_error)
+
+    def _render_bitacora_page(self, page_items: List[Dict[str, Any]]):
         self.table_bitacora.blockSignals(True)
-        self.table_bitacora.setRowCount(len(rows))
-        for r, row in enumerate(rows):
+        self.table_bitacora.clearContents()
+        self.table_bitacora.setRowCount(len(page_items))
+        for r, row in enumerate(page_items):
             id_b = _safe_str(row.get("ID_BITACORA"))
             fh = _safe_str(row.get("FECHA_HORA"))
             op = _safe_str(row.get("OPERACION"))
@@ -1200,37 +1326,48 @@ class IncidentsInterface(QWidget):
         self.stack_views.addWidget(tab_widget)
 
     def refresh_metricas_view(self):
-        stats = m7_incidents_service.get_estadisticas_incidentes()
+        def _fetch():
+            return m7_incidents_service.get_estadisticas_incidentes()
 
-        # Severidad
-        self.table_stats_sev.blockSignals(True)
-        self.table_stats_sev.setRowCount(len(stats["por_severidad"]))
-        for r, row in enumerate(stats["por_severidad"]):
-            sev_val = _safe_str(row.get("NIVEL_SEVERIDAD"))
-            self.table_stats_sev.setCellWidget(r, 0, StatusBadge(sev_val, self.table_stats_sev))
-            self.table_stats_sev.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
-        self.table_stats_sev.blockSignals(False)
-        auto_fit_table_columns(self.table_stats_sev)
+        def _on_loaded(stats: Dict[str, Any]):
+            # Severidad
+            self.table_stats_sev.blockSignals(True)
+            self.table_stats_sev.clearContents()
+            self.table_stats_sev.setRowCount(len(stats.get("por_severidad", [])))
+            for r, row in enumerate(stats.get("por_severidad", [])):
+                sev_val = _safe_str(row.get("NIVEL_SEVERIDAD"))
+                self.table_stats_sev.setCellWidget(r, 0, StatusBadge(sev_val, self.table_stats_sev))
+                self.table_stats_sev.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
+            self.table_stats_sev.blockSignals(False)
+            auto_fit_table_columns(self.table_stats_sev)
 
-        # Tipo
-        self.table_stats_tipo.blockSignals(True)
-        self.table_stats_tipo.setRowCount(len(stats["por_tipo"]))
-        for r, row in enumerate(stats["por_tipo"]):
-            tipo_val = _safe_str(row.get("TIPO"))
-            self.table_stats_tipo.setCellWidget(r, 0, StatusBadge(tipo_val, self.table_stats_tipo))
-            self.table_stats_tipo.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
-        self.table_stats_tipo.blockSignals(False)
-        auto_fit_table_columns(self.table_stats_tipo)
+            # Tipo
+            self.table_stats_tipo.blockSignals(True)
+            self.table_stats_tipo.clearContents()
+            self.table_stats_tipo.setRowCount(len(stats.get("por_tipo", [])))
+            for r, row in enumerate(stats.get("por_tipo", [])):
+                tipo_val = _safe_str(row.get("TIPO"))
+                self.table_stats_tipo.setCellWidget(r, 0, StatusBadge(tipo_val, self.table_stats_tipo))
+                self.table_stats_tipo.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
+            self.table_stats_tipo.blockSignals(False)
+            auto_fit_table_columns(self.table_stats_tipo)
 
-        # Estado
-        self.table_stats_est.blockSignals(True)
-        self.table_stats_est.setRowCount(len(stats["por_estado"]))
-        for r, row in enumerate(stats["por_estado"]):
-            est_val = _safe_str(row.get("ESTADO"))
-            self.table_stats_est.setCellWidget(r, 0, StatusBadge(est_val, self.table_stats_est))
-            self.table_stats_est.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
-        self.table_stats_est.blockSignals(False)
-        auto_fit_table_columns(self.table_stats_est)
+            # Estado
+            self.table_stats_est.blockSignals(True)
+            self.table_stats_est.clearContents()
+            self.table_stats_est.setRowCount(len(stats.get("por_estado", [])))
+            for r, row in enumerate(stats.get("por_estado", [])):
+                est_val = _safe_str(row.get("ESTADO"))
+                self.table_stats_est.setCellWidget(r, 0, StatusBadge(est_val, self.table_stats_est))
+                self.table_stats_est.setItem(r, 1, QTableWidgetItem(str(row.get("TOTAL", 0))))
+            self.table_stats_est.blockSignals(False)
+            auto_fit_table_columns(self.table_stats_est)
+
+        def _on_error(err: str):
+            InfoBar.error(title="Error al Cargar Métricas", content=err, parent=self.window(), duration=4000)
+
+        self.run_async_fetch("metricas", _fetch, _on_loaded, _on_error)
+
 
     # ==========================================================================
     # CARGA GLOBAL DESDE MAIN WINDOW
