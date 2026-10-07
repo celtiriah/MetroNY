@@ -152,7 +152,7 @@ class EmpleadoDialog(MessageBoxBase):
         form.addRow("Teléfono:", self.txt_tel)
 
         self.txt_correo = LineEdit(self)
-        self.txt_correo.setPlaceholderText("nombre.apellido@mta.info (Opcional)")
+        self.txt_correo.setPlaceholderText("nombre.apellido@mta.info")
         if self.es_edicion and self.emp_data:
             self.txt_correo.setText(_safe_str(self.emp_data.get("CORREO_ELECTRONICO", "")))
         form.addRow("Correo Electrónico (Opcional):", self.txt_correo)

@@ -357,6 +357,7 @@ DECLARE
 BEGIN
     avanzar_secuencia('SEQ_LINEA', 10);
     avanzar_secuencia('SEQ_ESTACION', 20);
+    avanzar_secuencia('SEQ_LINEA_ESTACION', 20);
     avanzar_secuencia('SEQ_HORARIO_ESTACION', 20);
     avanzar_secuencia('SEQ_PLATAFORMA', 20);
     avanzar_secuencia('SEQ_ESTACION_SERVICIO', 20);

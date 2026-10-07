@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QStackedWidget, QFrame, QColorDialog
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QIcon, QPixmap, QPainter
 
 from qfluentwidgets import (
     TitleLabel, SubtitleLabel, CaptionLabel, BodyLabel, StrongBodyLabel,
@@ -231,17 +231,30 @@ class EstacionDialog(MessageBoxBase):
         }
 
 
+def create_color_icon(hex_code: str) -> QIcon:
+    """Genera un icono circular de muestra con el color especificado."""
+    pix = QPixmap(16, 16)
+    pix.fill(QColor("transparent"))
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(QColor(hex_code))
+    painter.setPen(QColor(128, 128, 128, 90))
+    painter.drawEllipse(1, 1, 14, 14)
+    painter.end()
+    return QIcon(pix)
+
+
 MTA_OFFICIAL_COLORS = [
-    ("#EE352E", "Rojo MTA - 7th Ave Express (Líneas 1, 2, 3)"),
-    ("#00933C", "Verde MTA - Lexington Ave (Líneas 4, 5, 6)"),
-    ("#0039A6", "Azul MTA - 8th Ave Express (Líneas A, C, E)"),
-    ("#FF6319", "Naranja MTA - 6th Ave (Líneas B, D, F, M)"),
-    ("#FCCC0A", "Amarillo MTA - Broadway (Líneas N, Q, R, W)"),
-    ("#A7A9AC", "Gris MTA - Canarsie (Línea L)"),
-    ("#B933AD", "Morado MTA - Flushing (Línea 7)"),
-    ("#6CBE45", "Verde Lima MTA - Crosstown (Línea G)"),
-    ("#996633", "Marrón MTA - Nassau St (Líneas J, Z)"),
-    ("#808183", "Gris Pizarra MTA - Shuttles (Línea S)"),
+    ("#EE352E", "Rojo"),
+    ("#00933C", "Verde"),
+    ("#0039A6", "Azul"),
+    ("#FF6319", "Naranja"),
+    ("#FCCC0A", "Amarillo"),
+    ("#A7A9AC", "Gris"),
+    ("#B933AD", "Morado"),
+    ("#6CBE45", "Verde Lima"),
+    ("#996633", "Marrón"),
+    ("#808183", "Gris Pizarra"),
 ]
 
 
@@ -277,25 +290,32 @@ class LineaDialog(MessageBoxBase):
             self.txt_nombre.setText(str(data.get("NOMBRE", "")))
         form_layout.addWidget(self.txt_nombre, 1, 1)
 
-        # Color oficial MTA
-        form_layout.addWidget(CaptionLabel("Color Oficial MTA:", self), 2, 0)
+        # Color oficial
+        form_layout.addWidget(CaptionLabel("Color de la Línea:", self), 2, 0)
         color_layout = QHBoxLayout()
+        color_layout.setSpacing(8)
         self.combo_color = ComboBox(self)
         initial_color = str(data.get("COLOR", "#0039A6")).strip() if self.is_edit else "#0039A6"
         matched_color = False
         for hex_val, label in MTA_OFFICIAL_COLORS:
-            self.combo_color.addItem(label, userData=hex_val)
+            self.combo_color.addItem(label, icon=create_color_icon(hex_val), userData=hex_val)
             if initial_color.upper() == hex_val.upper():
                 matched_color = True
 
-        self.combo_color.addItem("Color Personalizado...", userData="CUSTOM")
+        self.combo_color.addItem("Personalizado...", icon=FIF.PALETTE.icon(), userData="CUSTOM")
+
+        # Indicador visual de muestra del color
+        self.color_preview = QFrame(self)
+        self.color_preview.setFixedSize(24, 24)
+        self.update_color_preview(initial_color)
 
         self.txt_color = LineEdit(self)
         self.txt_color.setPlaceholderText("#RRGGBB")
         self.txt_color.setText(initial_color)
         self.txt_color.setFixedWidth(85)
+        self.txt_color.textChanged.connect(self.on_color_text_changed)
 
-        self.btn_pick_color = PushButton("Elegir...", self)
+        self.btn_pick_color = PushButton("Elegir...", self, FIF.PALETTE)
         self.btn_pick_color.clicked.connect(self.choose_custom_color)
 
         self.combo_color.currentIndexChanged.connect(self.on_color_combo_changed)
@@ -311,6 +331,7 @@ class LineaDialog(MessageBoxBase):
                 self.combo_color.setCurrentIndex(idx)
 
         color_layout.addWidget(self.combo_color, 1)
+        color_layout.addWidget(self.color_preview)
         color_layout.addWidget(self.txt_color)
         color_layout.addWidget(self.btn_pick_color)
         form_layout.addLayout(color_layout, 2, 1)
@@ -392,19 +413,53 @@ class LineaDialog(MessageBoxBase):
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(500)
 
-    def on_color_combo_changed(self):
+    def update_color_preview(self, hex_code: str) -> None:
+        """Actualiza el indicador visual circular con el color proporcionado."""
+        col = QColor(hex_code)
+        if col.isValid():
+            self.color_preview.setStyleSheet(
+                f"background-color: {col.name()}; border-radius: 12px; border: 2px solid rgba(128, 128, 128, 0.4);"
+            )
+        else:
+            self.color_preview.setStyleSheet(
+                "background-color: transparent; border-radius: 12px; border: 2px dashed rgba(128, 128, 128, 0.4);"
+            )
+
+    def on_color_combo_changed(self) -> None:
         val = self.combo_color.currentData()
         if val and val != "CUSTOM":
-            self.txt_color.setText(val)
+            self.txt_color.blockSignals(True)
+            self.txt_color.setText(str(val))
+            self.txt_color.blockSignals(False)
+            self.update_color_preview(str(val))
 
-    def choose_custom_color(self):
+    def on_color_text_changed(self, text: str) -> None:
+        val = text.strip()
+        self.update_color_preview(val)
+        idx = self.combo_color.findData(val.upper())
+        if idx >= 0:
+            if self.combo_color.currentIndex() != idx:
+                self.combo_color.blockSignals(True)
+                self.combo_color.setCurrentIndex(idx)
+                self.combo_color.blockSignals(False)
+        else:
+            custom_idx = self.combo_color.findData("CUSTOM")
+            if custom_idx >= 0 and self.combo_color.currentIndex() != custom_idx:
+                self.combo_color.blockSignals(True)
+                self.combo_color.setCurrentIndex(custom_idx)
+                self.combo_color.blockSignals(False)
+
+    def choose_custom_color(self) -> None:
         col = QColorDialog.getColor(QColor(self.txt_color.text() or "#0039A6"), self, "Seleccionar Color de Línea")
         if col.isValid():
             hex_str = col.name().upper()
             self.txt_color.setText(hex_str)
+            self.update_color_preview(hex_str)
             idx = self.combo_color.findData("CUSTOM")
             if idx >= 0:
+                self.combo_color.blockSignals(True)
                 self.combo_color.setCurrentIndex(idx)
+                self.combo_color.blockSignals(False)
 
     def get_data(self) -> dict:
         op_selected = self.combo_operador.currentData() or self.combo_operador.currentText()
@@ -523,10 +578,16 @@ class TransferenciaDialog(MessageBoxBase):
 
 class AsociarEstacionDialog(MessageBoxBase):
     """Diálogo modal para asociar una estación a una línea definiendo orden, distancia y tiempo."""
-    def __init__(self, estaciones_disponibles=None, next_order=1, tramo_data=None, parent=None):
+    def __init__(self, estaciones_disponibles=None, next_order=1, tramo_data=None, existing_orders=None, parent=None):
         super().__init__(parent or None)
         data = tramo_data or {}
         self.is_edit = tramo_data is not None
+        self.existing_orders: set[int] = set(existing_orders or [])
+        if self.is_edit and "ORDEN" in data:
+            try:
+                self.existing_orders.discard(int(data["ORDEN"]))
+            except Exception:
+                pass
 
         title_text = "Modificar Tramo de Línea" if self.is_edit else "Asociar Estación a Línea"
         self.titleLabel = SubtitleLabel(title_text, self)
@@ -551,6 +612,7 @@ class AsociarEstacionDialog(MessageBoxBase):
         self.spin_orden = SpinBox(self)
         self.spin_orden.setRange(1, 150)
         self.spin_orden.setValue(int(data.get("ORDEN", next_order)) if self.is_edit else next_order)
+        self.spin_orden.valueChanged.connect(self._check_order)
         form.addWidget(self.spin_orden, 1, 1)
 
         # Distancia en Km
@@ -570,14 +632,44 @@ class AsociarEstacionDialog(MessageBoxBase):
         self.spin_tiempo.setValue(t_val)
         form.addWidget(self.spin_tiempo, 3, 1)
 
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        form.addWidget(self.lbl_error, 4, 0, 1, 2)
+
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Guardar Tramo")
         self.cancelButton.setText("Cancelar")
         self.widget.setMinimumWidth(420)
 
+    def _check_order(self, val: int) -> None:
+        if val in self.existing_orders:
+            self.lbl_error.setText(f"Aviso: El orden {val} ya está ocupado por otra estación en esta línea.")
+            self.lbl_error.show()
+        else:
+            self.lbl_error.hide()
+
+    def validate(self) -> bool:
+        if not self.is_edit:
+            raw_data = self.combo_estacion.currentData()
+            if raw_data is None:
+                self.lbl_error.setText("Debes seleccionar una estación disponible.")
+                self.lbl_error.show()
+                return False
+        if self.spin_orden.value() in self.existing_orders:
+            self.lbl_error.setText(f"El orden secuencial {self.spin_orden.value()} ya está ocupado en esta línea.")
+            self.lbl_error.show()
+            return False
+        return True
+
     def get_data(self) -> dict:
+        est_id = None
+        if not self.is_edit:
+            raw_data = self.combo_estacion.currentData()
+            est_id = int(raw_data) if raw_data is not None else None
         return {
-            "estacion_id": self.combo_estacion.currentData() if not self.is_edit else None,
+            "estacion_id": est_id,
             "orden": self.spin_orden.value(),
             "distancia_km": self.spin_distancia.value(),
             "tiempo_min": self.spin_tiempo.value()
@@ -820,6 +912,10 @@ class StationsInterface(QWidget):
         self.btn_desactivar_linea.clicked.connect(self.handle_desactivar_linea)
         bar_lin.addWidget(self.btn_desactivar_linea)
 
+        self.btn_eliminar_linea = PushButton("Eliminar Línea", view_lineas, FIF.DELETE)
+        self.btn_eliminar_linea.clicked.connect(self.handle_eliminar_linea)
+        bar_lin.addWidget(self.btn_eliminar_linea)
+
         v_lin_layout.addLayout(bar_lin)
 
         # Tabla Principal de Líneas
@@ -961,7 +1057,17 @@ class StationsInterface(QWidget):
         auto_fit_table_columns(self.table_lines)
 
         if self.lineas_cache:
-            self.table_lines.selectRow(0)
+            if self.selected_line_id:
+                matching = [i for i, lin in enumerate(self.lineas_cache) if int(lin["ID_LINEA"]) == self.selected_line_id]
+                if matching:
+                    self.table_lines.selectRow(matching[0])
+                else:
+                    self.clear_line_topology()
+                    self.table_lines.selectRow(0)
+            else:
+                self.table_lines.selectRow(0)
+        else:
+            self.clear_line_topology()
 
     def apply_station_filters(self):
         self.refresh_stations()
@@ -1021,6 +1127,14 @@ class StationsInterface(QWidget):
             self.table_trans.setCellWidget(r, 3, StatusBadge("Peatonal Subterránea", self.table_trans))
         auto_fit_table_columns(self.table_trans)
 
+    def clear_station_details(self):
+        """Limpia la vista de detalle e inspección de estación cuando se elimina o no hay selección."""
+        self.selected_station_id = None
+        self.lbl_insp_estacion.setText("Selecciona una estación para inspeccionar sus plataformas, líneas y transferencias")
+        self.table_plataformas.setRowCount(0)
+        self.table_lineas_est.setRowCount(0)
+        self.table_trans.setRowCount(0)
+
     def on_line_row_selected(self):
         selected_items = self.table_lines.selectedItems()
         if not selected_items:
@@ -1046,6 +1160,12 @@ class StationsInterface(QWidget):
             ada = "Sí (ADA)" if t.get("ACCESIBLE_DISCAPACIDAD") == "S" else "No"
             self.table_line_stations.setCellWidget(r, 6, StatusBadge(ada, self.table_line_stations))
         auto_fit_table_columns(self.table_line_stations)
+
+    def clear_line_topology(self):
+        """Limpia el panel de recorrido topológico cuando no hay línea seleccionada o fue eliminada."""
+        self.selected_line_id = None
+        self.lbl_topo_title.setText("Recorrido Secuencial de Estaciones (Topología)")
+        self.table_line_stations.setRowCount(0)
 
     # ==========================================================================
     # ACCIONES CRUD DE ESTACIONES
@@ -1119,6 +1239,7 @@ class StationsInterface(QWidget):
         """
         Maneja la eliminación o baja operativa de estaciones con protección contra
         Hard-Delete masivo en cascada y auditoría de integridad relacional.
+        Permite el borrado físico permanente de estaciones agregadas sin historial.
         """
         selected_items = self.table_stations.selectedItems()
         if not selected_items:
@@ -1148,6 +1269,7 @@ class StationsInterface(QWidget):
                 res = network_service.dar_de_baja_masiva_estaciones(ids_a_bajar)
                 if res.get("success"):
                     InfoBar.success("Baja Masiva Segura", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.clear_station_details()
                     self.refresh_stations()
                 else:
                     InfoBar.error("Error", res.get("error", "Fallo al procesar estaciones."), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
@@ -1165,29 +1287,26 @@ class StationsInterface(QWidget):
 
         deps = network_service.verificar_dependencias_estacion(id_est)
 
-        if deps["tiene_dependencias"]:
+        if deps.get("tiene_historial_inmutable"):
+            # Caso 1: Estación con viajes, incidentes o terminal de línea/ruta (historial auditado)
             detalles_deps = []
-            if deps["lineas"] > 0:
-                detalles_deps.append(f"• {deps['lineas']} líneas troncales vinculadas")
-            if deps["rutas"] > 0:
-                detalles_deps.append(f"• {deps['rutas']} recorridos / rutas programadas")
-            if deps["plataformas"] > 0:
-                detalles_deps.append(f"• {deps['plataformas']} plataformas / andenes")
-            if deps["transferencias"] > 0:
-                detalles_deps.append(f"• {deps['transferencias']} transferencias peatonales")
-            if deps["viajes"] > 0:
+            if deps.get("viajes", 0) > 0:
                 detalles_deps.append(f"• {deps['viajes']} viajes históricos de pasajeros")
-            if deps["incidentes"] > 0:
+            if deps.get("incidentes", 0) > 0:
                 detalles_deps.append(f"• {deps['incidentes']} incidentes operativos registrados")
+            if deps.get("lineas_terminal", 0) > 0:
+                detalles_deps.append(f"• {deps['lineas_terminal']} cabeceras terminales de línea")
+            if deps.get("rutas_terminal", 0) > 0:
+                detalles_deps.append(f"• {deps['rutas_terminal']} cabeceras terminales de ruta")
 
             texto_deps = "\n".join(detalles_deps)
 
             mb = MessageBox(
-                "Baja Operativa Requerida (Soft-Delete)",
+                "Baja Operativa Requerida (Historial Existente)",
                 f"La estación '{nombre}' [{codigo}] posee registros operativos activos en la red:\n\n"
                 f"{texto_deps}\n\n"
                 "Por integridad relacional del sistema MTA, el borrado físico (Hard-Delete) está "
-                "estrictamente bloqueado para evitar la pérdida de registros históricos.\n\n"
+                "bloqueado para evitar la pérdida de registros históricos.\n\n"
                 "¿Deseas realizar una Baja Operativa Segura (Soft-Delete), marcando la estación y sus andenes como 'Cerrada'?",
                 parent=self.window()
             )
@@ -1200,22 +1319,57 @@ class StationsInterface(QWidget):
                     self.refresh_stations()
                 else:
                     InfoBar.error("Error al Desactivar", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
-        else:
+
+        elif deps.get("componentes_borrables", 0) > 0:
+            # Caso 2: Sin historial operativo pero con componentes configurados (andenes, tramos)
+            detalles_comp = []
+            if deps.get("plataformas", 0) > 0:
+                detalles_comp.append(f"• {deps['plataformas']} plataformas / andenes")
+            if deps.get("lineas_estacion", 0) > 0:
+                detalles_comp.append(f"• {deps['lineas_estacion']} tramos de línea asociados")
+            if deps.get("transferencias", 0) > 0:
+                detalles_comp.append(f"• {deps['transferencias']} transferencias peatonales")
+            if deps.get("rutas_detalle", 0) > 0:
+                detalles_comp.append(f"• {deps['rutas_detalle']} tramos de ruta")
+
+            texto_comp = "\n".join(detalles_comp)
+
             mb = MessageBox(
-                "Eliminar Estación sin Dependencias",
-                f"La estación '{nombre}' [{codigo}] no tiene líneas, andenes ni viajes asociados.\n\n"
-                "¿Deseas darla de baja operativa (Soft-Delete: 'Cerrada') o cancelar?",
+                "Eliminar Estación y Componentes Asociados",
+                f"La estación '{nombre}' [{codigo}] no tiene viajes históricos, pero posee componentes vinculados:\n\n"
+                f"{texto_comp}\n\n"
+                "¿Deseas eliminar permanentemente esta estación junto con todos sus andenes y tramos asociados de la base de datos?",
                 parent=self.window()
             )
-            mb.yesButton.setText("Baja Operativa Segura")
+            mb.yesButton.setText("Eliminar Estación y Componentes")
             mb.cancelButton.setText("Cancelar")
             if mb.exec():
-                res = network_service.eliminar_estacion(id_est, forzar_soft_delete=True)
+                res = network_service.eliminar_estacion(id_est, forzar_soft_delete=False, purgar_componentes=True)
                 if res.get("success"):
-                    InfoBar.success("Acción Completada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    InfoBar.success("Estación Eliminada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.clear_station_details()
                     self.refresh_stations()
                 else:
-                    InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    InfoBar.error("Error al Eliminar", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+
+        else:
+            # Caso 3: Sin ninguna dependencia (estación recién creada)
+            mb = MessageBox(
+                "Eliminar Estación Permanentemente",
+                f"¿Estás seguro de que deseas eliminar permanentemente la estación '{nombre}' [{codigo}] de la base de datos?\n\n"
+                "Esta estación no posee andenes, líneas ni viajes asociados. El registro será borrado definitivamente.",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Eliminar Permanentemente")
+            mb.cancelButton.setText("Cancelar")
+            if mb.exec():
+                res = network_service.eliminar_estacion(id_est, forzar_soft_delete=False)
+                if res.get("success"):
+                    InfoBar.success("Estación Eliminada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.clear_station_details()
+                    self.refresh_stations()
+                else:
+                    InfoBar.error("Error al Eliminar", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
 
     # ==========================================================================
     # ACCIONES DE PLATAFORMAS Y TRANSFERENCIAS (REQUERIMIENTOS 6 Y 7)
@@ -1354,6 +1508,108 @@ class StationsInterface(QWidget):
         else:
             InfoBar.error("Error", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
 
+    def handle_eliminar_linea(self):
+        """
+        Maneja la eliminación o suspensión de líneas con protección contra
+        pérdida de historial operativo (despachos de viajes, incidentes).
+        Permite el borrado físico permanente de líneas agregadas sin historial.
+        """
+        selected_items = self.table_lines.selectedItems()
+        if not selected_items:
+            InfoBar.warning("Sin Selección", "Selecciona una línea en la tabla para dar de baja o eliminar.", parent=self.window())
+            return
+
+        row = selected_items[0].row()
+        if row >= len(self.lineas_cache):
+            return
+
+        linea_data = self.lineas_cache[row]
+        id_lin = int(linea_data["ID_LINEA"])
+        codigo = str(linea_data.get("CODIGO", ""))
+        nombre = str(linea_data.get("NOMBRE", "Línea"))
+
+        deps = network_service.verificar_dependencias_linea(id_lin)
+
+        if deps.get("tiene_historial_inmutable"):
+            # Caso 1: Línea con despachos de viajes programados o incidentes registrados
+            detalles_deps = []
+            if deps.get("viajes_programados", 0) > 0:
+                detalles_deps.append(f"• {deps['viajes_programados']} despachos / viajes programados")
+            if deps.get("incidentes", 0) > 0:
+                detalles_deps.append(f"• {deps['incidentes']} incidentes operativos registrados")
+
+            texto_deps = "\n".join(detalles_deps)
+
+            mb = MessageBox(
+                "Baja Operativa Requerida (Historial Existente)",
+                f"La línea '{codigo} - {nombre}' posee registros operativos auditados en la red:\n\n"
+                f"{texto_deps}\n\n"
+                "Por integridad relacional y normativa de auditoría del sistema MTA, el borrado físico está "
+                "bloqueado para evitar la pérdida de registros históricos de servicio.\n\n"
+                "¿Deseas realizar una Baja Operativa Segura marcando la línea como 'Suspendida'?",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Suspender Línea")
+            mb.cancelButton.setText("Cancelar")
+            if mb.exec():
+                res = network_service.eliminar_linea(id_lin, forzar_soft_delete=True)
+                if res.get("success"):
+                    InfoBar.success("Línea Suspendida", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.refresh_lines()
+                else:
+                    InfoBar.error("Error al Suspender", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+
+        elif deps.get("componentes_borrables", 0) > 0:
+            # Caso 2: Sin historial operativo pero con paradas, transferencias o rutas configuradas
+            detalles_comp = []
+            if deps.get("tramos_estacion", 0) > 0:
+                detalles_comp.append(f"• {deps['tramos_estacion']} paradas / tramos de estación vinculados")
+            if deps.get("transferencias", 0) > 0:
+                detalles_comp.append(f"• {deps['transferencias']} transferencias peatonales asociadas")
+            if deps.get("rutas", 0) > 0:
+                detalles_comp.append(f"• {deps['rutas']} rutas comerciales configuradas")
+
+            texto_comp = "\n".join(detalles_comp)
+
+            mb = MessageBox(
+                "Eliminar Línea y Componentes Asociados",
+                f"La línea '{codigo} - {nombre}' no tiene viajes históricos, pero posee componentes configurados:\n\n"
+                f"{texto_comp}\n\n"
+                "¿Deseas eliminar permanentemente esta línea junto con todas sus paradas, transferencias y rutas asociadas de la base de datos?",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Eliminar Línea y Componentes")
+            mb.cancelButton.setText("Cancelar")
+            if mb.exec():
+                res = network_service.eliminar_linea(id_lin, forzar_soft_delete=False, purgar_componentes=True)
+                if res.get("success"):
+                    InfoBar.success("Línea Eliminada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.clear_line_topology()
+                    self.refresh_lines()
+                    self.refresh_stations()
+                else:
+                    InfoBar.error("Error al Eliminar", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+
+        else:
+            # Caso 3: Sin dependencias (línea recién creada sin paradas ni rutas)
+            mb = MessageBox(
+                "Eliminar Línea Permanentemente",
+                f"¿Estás seguro de que deseas eliminar permanentemente la línea '{codigo} - {nombre}' de la base de datos?\n\n"
+                "Esta línea no posee estaciones asignadas ni operaciones registradas. El registro será borrado definitivamente.",
+                parent=self.window()
+            )
+            mb.yesButton.setText("Eliminar Permanentemente")
+            mb.cancelButton.setText("Cancelar")
+            if mb.exec():
+                res = network_service.eliminar_linea(id_lin, forzar_soft_delete=False)
+                if res.get("success"):
+                    InfoBar.success("Línea Eliminada", res.get("mensaje"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    self.clear_line_topology()
+                    self.refresh_lines()
+                    self.refresh_stations()
+                else:
+                    InfoBar.error("Error al Eliminar", res.get("error"), parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+
     # ==========================================================================
     # GESTIÓN DE TOPOLOGÍA DE LÍNEA (REQUERIMIENTOS 3, 4, 5 Y 9)
     # ==========================================================================
@@ -1366,9 +1622,20 @@ class StationsInterface(QWidget):
         if not disponibles:
             InfoBar.warning("Sin Estaciones Disponibles", "Todas las estaciones ya están asociadas a esta línea.", parent=self.window())
             return
-        next_ord = self.table_line_stations.rowCount() + 1
-        dlg = AsociarEstacionDialog(estaciones_disponibles=disponibles, next_order=next_ord, parent=self.window())
+        tramos = network_service.get_estaciones_de_linea_ordenadas(self.selected_line_id)
+        existing_orders = [int(s["ORDEN"]) for s in tramos if str(s.get("ORDEN", "")).isdigit()]
+        next_ord = (max(existing_orders) + 1) if existing_orders else 1
+
+        dlg = AsociarEstacionDialog(
+            estaciones_disponibles=disponibles,
+            next_order=next_ord,
+            existing_orders=existing_orders,
+            parent=self.window()
+        )
         if dlg.exec():
+            if not dlg.validate():
+                InfoBar.warning("Validación Fallida", "Verifique que la estación y el orden de parada sean válidos.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                return
             d = dlg.get_data()
             if not d.get("estacion_id"):
                 InfoBar.warning("Estación Requerida", "Debes seleccionar una estación válida para asociar.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
@@ -1396,8 +1663,16 @@ class StationsInterface(QWidget):
         tramos = network_service.get_estaciones_de_linea_ordenadas(self.selected_line_id)
         if row < len(tramos):
             tramo = tramos[row]
-            dlg = AsociarEstacionDialog(tramo_data=tramo, parent=self.window())
+            existing_orders = [int(s["ORDEN"]) for s in tramos if str(s.get("ORDEN", "")).isdigit()]
+            dlg = AsociarEstacionDialog(
+                tramo_data=tramo,
+                existing_orders=existing_orders,
+                parent=self.window()
+            )
             if dlg.exec():
+                if not dlg.validate():
+                    InfoBar.warning("Validación Fallida", "El orden seleccionado ya está asignado a otra estación en esta línea.", parent=self.window(), position=InfoBarPosition.TOP_RIGHT)
+                    return
                 d = dlg.get_data()
                 res = network_service.modificar_tramo_linea_estacion(
                     id_linea_estacion=int(tramo["ID_LINEA_ESTACION"]),

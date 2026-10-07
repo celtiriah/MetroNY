@@ -184,7 +184,7 @@ def cambiar_estado_estacion(id_estacion: int, nuevo_estado: str) -> dict:
 def verificar_dependencias_estacion(id_estacion: int) -> dict:
     """
     Audita todas las dependencias relacionales de una estación antes de cualquier acción de baja o borrado.
-    Verifica plataformas, paradas y terminales de línea, rutas, transferencias, viajes históricos e incidentes.
+    Distingue entre historial operativo inmutable (viajes, incidentes, terminales) y componentes borrables (andenes, tramos).
     """
     sql = """
         SELECT
@@ -201,7 +201,12 @@ def verificar_dependencias_estacion(id_estacion: int) -> dict:
     try:
         rows = execute_query(sql, {"id": id_estacion})["rows"]
         if not rows:
-            return {"plataformas": 0, "lineas": 0, "rutas": 0, "transferencias": 0, "viajes": 0, "incidentes": 0, "total": 0, "tiene_dependencias": False}
+            return {
+                "plataformas": 0, "lineas": 0, "lineas_estacion": 0, "lineas_terminal": 0,
+                "rutas": 0, "rutas_detalle": 0, "rutas_terminal": 0, "transferencias": 0,
+                "viajes": 0, "incidentes": 0, "total": 0, "tiene_dependencias": False,
+                "tiene_historial_inmutable": False, "componentes_borrables": 0
+            }
         d = rows[0]
         plats = int(d.get("PLATAFORMAS", 0))
         lins_est = int(d.get("LINEAS_ESTACION", 0))
@@ -215,71 +220,110 @@ def verificar_dependencias_estacion(id_estacion: int) -> dict:
         lins_total = lins_est + lins_term
         ruts_total = ruts_det + ruts_term
         total = plats + lins_total + ruts_total + trans + vjs + incs
+        historial_inmutable = (vjs > 0) or (incs > 0) or (lins_term > 0) or (ruts_term > 0)
+        componentes_borrables = plats + lins_est + trans + ruts_det
+
         return {
             "plataformas": plats,
             "lineas": lins_total,
+            "lineas_estacion": lins_est,
+            "lineas_terminal": lins_term,
             "rutas": ruts_total,
+            "rutas_detalle": ruts_det,
+            "rutas_terminal": ruts_term,
             "transferencias": trans,
             "viajes": vjs,
             "incidentes": incs,
             "total": total,
-            "tiene_dependencias": total > 0
+            "tiene_dependencias": total > 0,
+            "tiene_historial_inmutable": historial_inmutable,
+            "componentes_borrables": componentes_borrables
         }
     except Exception:
-        return {"plataformas": 0, "lineas": 0, "rutas": 0, "transferencias": 0, "viajes": 0, "incidentes": 0, "total": 0, "tiene_dependencias": False}
+        return {
+            "plataformas": 0, "lineas": 0, "lineas_estacion": 0, "lineas_terminal": 0,
+            "rutas": 0, "rutas_detalle": 0, "rutas_terminal": 0, "transferencias": 0,
+            "viajes": 0, "incidentes": 0, "total": 0, "tiene_dependencias": False,
+            "tiene_historial_inmutable": False, "componentes_borrables": 0
+        }
 
 
-def eliminar_estacion(id_estacion: int, forzar_soft_delete: bool = True) -> dict:
+def eliminar_estacion(id_estacion: int, forzar_soft_delete: bool = False, purgar_componentes: bool = False) -> dict:
     """
     Elimina o da de baja una estación de metro con estricta salvaguarda relacional.
-    Por defecto ejecuta un Soft-Delete (marcar como 'Cerrada' y desactivar plataformas),
-    preservando el historial de viajes, lineas y auditorias de transito.
-    Si se solicita borrado fisico, bloquea si existen registros dependientes.
+    - forzar_soft_delete=True: Marca como 'Cerrada' y desactiva andenes (Baja Operativa).
+    - forzar_soft_delete=False:
+        * Si posee viajes o incidentes históricos, el borrado físico queda bloqueado.
+        * Si no posee historial pero tiene componentes asociados (andenes, tramos, transferencias),
+          se pueden purgar de forma atómica si purgar_componentes=True.
+        * Si no posee dependencias o se autoriza purga de componentes, se elimina físicamente de la BD.
     """
     try:
         deps = verificar_dependencias_estacion(id_estacion)
 
         if forzar_soft_delete:
-            # Soft-Delete: Marcar estacion como 'Cerrada'
             execute_dml(
                 "UPDATE ESTACION SET estado_operativo = 'Cerrada' WHERE id_estacion = :id",
                 {"id": id_estacion}
             )
-            # Desactivar plataformas vinculadas
             execute_dml(
                 "UPDATE PLATAFORMA SET estado_operativo = 'Fuera de Servicio' WHERE estacion_id = :id",
                 {"id": id_estacion}
             )
             return {
                 "success": True,
-                "mensaje": "Baja operativa segura ejecutada (Soft-Delete). La estación y sus plataformas asociadas fueron marcadas como 'Cerrada'. La integridad historica de la red ha sido preservada.",
+                "mensaje": "Baja operativa segura ejecutada (Soft-Delete). La estación y sus plataformas asociadas fueron marcadas como 'Cerrada'. La integridad histórica de la red ha sido preservada.",
                 "soft_deleted": True
             }
 
-        # Intento de Hard-Delete fisico
-        if deps["tiene_dependencias"]:
+        # Intento de borrado físico definitivo
+        if deps["tiene_historial_inmutable"]:
             detalles = []
-            if deps["lineas"] > 0:
-                detalles.append(f"{deps['lineas']} líneas")
-            if deps["rutas"] > 0:
-                detalles.append(f"{deps['rutas']} rutas")
-            if deps["plataformas"] > 0:
-                detalles.append(f"{deps['plataformas']} plataformas")
             if deps["viajes"] > 0:
                 detalles.append(f"{deps['viajes']} viajes históricos")
             if deps["incidentes"] > 0:
                 detalles.append(f"{deps['incidentes']} incidentes")
+            if deps["lineas_terminal"] > 0:
+                detalles.append(f"{deps['lineas_terminal']} terminales de línea")
+            if deps["rutas_terminal"] > 0:
+                detalles.append(f"{deps['rutas_terminal']} terminales de ruta")
             detalle_str = ", ".join(detalles)
             return {
                 "success": False,
-                "error": f"Bloqueo de seguridad: No se puede eliminar físicamente la estación porque posee dependencias activas ({detalle_str}). Utilice la Baja Operativa (Soft-Delete) para preservar los registros de tránsito."
+                "error": f"Bloqueo de seguridad: No se puede eliminar físicamente la estación porque posee registros históricos auditados ({detalle_str}). Utilice la Baja Operativa (marcar como 'Cerrada') para preservar el historial."
             }
 
-        # Borrado fisico permitido unicamente si no tiene dependencias
-        execute_dml("DELETE FROM ESTACION WHERE id_estacion = :id", {"id": id_estacion})
+        # Si tiene componentes asociados pero no se autorizó purgarlos
+        if deps["componentes_borrables"] > 0 and not purgar_componentes:
+            detalles_c = []
+            if deps["plataformas"] > 0:
+                detalles_c.append(f"{deps['plataformas']} plataformas")
+            if deps["lineas_estacion"] > 0:
+                detalles_c.append(f"{deps['lineas_estacion']} tramos de línea")
+            if deps["transferencias"] > 0:
+                detalles_c.append(f"{deps['transferencias']} transferencias")
+            detalle_c_str = ", ".join(detalles_c)
+            return {
+                "success": False,
+                "error": f"La estación posee componentes asociados ({detalle_c_str}). Confirme la eliminación de componentes para continuar con el borrado físico."
+            }
+
+        # Borrado físico atómico
+        sql_delete = """
+            BEGIN
+                DELETE FROM TRANSFERENCIA WHERE estacion_id = :id;
+                DELETE FROM LINEA_ESTACION WHERE estacion_id = :id;
+                DELETE FROM RUTA_DETALLE WHERE estacion_id = :id;
+                DELETE FROM HORARIO_ESTACION WHERE estacion_id = :id;
+                DELETE FROM ESTACION_SERVICIO WHERE estacion_id = :id;
+                DELETE FROM PLATAFORMA WHERE estacion_id = :id;
+                DELETE FROM ESTACION WHERE id_estacion = :id;
+            END;
+        """
+        execute_dml(sql_delete, {"id": id_estacion})
         return {
             "success": True,
-            "mensaje": "Estación sin dependencias eliminada físicamente de forma exitosa.",
+            "mensaje": "Estación eliminada físicamente de forma exitosa de la base de datos.",
             "soft_deleted": False
         }
     except Exception as e:
@@ -563,6 +607,134 @@ def cambiar_estado_linea(id_linea: int, nuevo_estado: str) -> dict:
         return {"success": False, "error": parse_oracle_error(e)}
 
 
+def verificar_dependencias_linea(id_linea: int) -> dict:
+    """
+    Audita todas las dependencias relacionales de una línea antes de dar de baja o eliminar.
+    Distingue entre historial operativo inmutable (viajes programados, incidentes)
+    y componentes configurables (tramos de estaciones, transferencias, rutas sin viajes).
+    """
+    sql = """
+        SELECT
+            (SELECT COUNT(*) FROM LINEA_ESTACION WHERE linea_id = :id) as tramos_estacion,
+            (SELECT COUNT(*) FROM TRANSFERENCIA WHERE linea_origen_id = :id OR linea_destino_id = :id) as transferencias,
+            (SELECT COUNT(*) FROM RUTA WHERE linea_id = :id) as rutas,
+            (SELECT COUNT(*) FROM VIAJE_PROGRAMADO vp JOIN RUTA r ON vp.ruta_id = r.id_ruta WHERE r.linea_id = :id) as viajes_programados,
+            (SELECT COUNT(*) FROM INCIDENTE_ELEMENTO_AFECTADO WHERE linea_id = :id) as incidentes
+        FROM dual
+    """
+    try:
+        rows = execute_query(sql, {"id": id_linea})["rows"]
+        if not rows:
+            return {
+                "tramos_estacion": 0, "transferencias": 0, "rutas": 0,
+                "viajes_programados": 0, "incidentes": 0, "total": 0,
+                "tiene_dependencias": False, "tiene_historial_inmutable": False,
+                "componentes_borrables": 0
+            }
+        d = rows[0]
+        tramos = int(d.get("TRAMOS_ESTACION", 0))
+        trans = int(d.get("TRANSFERENCIAS", 0))
+        rutas = int(d.get("RUTAS", 0))
+        viajes = int(d.get("VIAJES_PROGRAMADOS", 0))
+        incs = int(d.get("INCIDENTES", 0))
+
+        total = tramos + trans + rutas + viajes + incs
+        historial_inmutable = (viajes > 0) or (incs > 0)
+        componentes_borrables = tramos + trans + rutas
+
+        return {
+            "tramos_estacion": tramos,
+            "transferencias": trans,
+            "rutas": rutas,
+            "viajes_programados": viajes,
+            "incidentes": incs,
+            "total": total,
+            "tiene_dependencias": total > 0,
+            "tiene_historial_inmutable": historial_inmutable,
+            "componentes_borrables": componentes_borrables
+        }
+    except Exception:
+        return {
+            "tramos_estacion": 0, "transferencias": 0, "rutas": 0,
+            "viajes_programados": 0, "incidentes": 0, "total": 0,
+            "tiene_dependencias": False, "tiene_historial_inmutable": False,
+            "componentes_borrables": 0
+        }
+
+
+def eliminar_linea(id_linea: int, forzar_soft_delete: bool = False, purgar_componentes: bool = False) -> dict:
+    """
+    Elimina o suspende una línea de metro con estricta salvaguarda relacional.
+    - forzar_soft_delete=True: Marca la línea como 'Suspendida'.
+    - forzar_soft_delete=False:
+        * Si posee viajes programados o incidentes históricos, el borrado físico queda bloqueado.
+        * Si no posee historial pero tiene componentes asociados (tramos, transferencias, rutas sin viajes),
+          se pueden purgar de forma atómica si purgar_componentes=True.
+        * Si no posee dependencias o se autoriza purga de componentes, se elimina físicamente de la BD.
+    """
+    try:
+        deps = verificar_dependencias_linea(id_linea)
+
+        if forzar_soft_delete:
+            execute_dml(
+                "UPDATE LINEA SET estado_operativo = 'Suspendida' WHERE id_linea = :id",
+                {"id": id_linea}
+            )
+            return {
+                "success": True,
+                "mensaje": "Baja operativa segura ejecutada. La línea fue marcada como 'Suspendida'. El historial de la red ha sido preservado.",
+                "soft_deleted": True
+            }
+
+        # Intento de borrado físico definitivo
+        if deps["tiene_historial_inmutable"]:
+            detalles = []
+            if deps["viajes_programados"] > 0:
+                detalles.append(f"{deps['viajes_programados']} despachos / viajes programados")
+            if deps["incidentes"] > 0:
+                detalles.append(f"{deps['incidentes']} incidentes operativos")
+            detalle_str = ", ".join(detalles)
+            return {
+                "success": False,
+                "error": f"Bloqueo de seguridad: No se puede eliminar físicamente la línea porque posee historial operativo registrado ({detalle_str}). Utilice la opción de Suspender la línea para preservar la integridad histórica."
+            }
+
+        # Si tiene componentes asociados pero no se autorizó la purga
+        if deps["componentes_borrables"] > 0 and not purgar_componentes:
+            detalles_c = []
+            if deps["tramos_estacion"] > 0:
+                detalles_c.append(f"{deps['tramos_estacion']} paradas / tramos de estación")
+            if deps["transferencias"] > 0:
+                detalles_c.append(f"{deps['transferencias']} transferencias peatonales")
+            if deps["rutas"] > 0:
+                detalles_c.append(f"{deps['rutas']} rutas comerciales")
+            detalle_c_str = ", ".join(detalles_c)
+            return {
+                "success": False,
+                "error": f"La línea posee componentes asociados ({detalle_c_str}). Confirme la eliminación de componentes para continuar con el borrado físico."
+            }
+
+        # Borrado físico atómico con purga
+        sql_delete = """
+            BEGIN
+                DELETE FROM HORARIO WHERE ruta_id IN (SELECT id_ruta FROM RUTA WHERE linea_id = :id);
+                DELETE FROM RUTA_DETALLE WHERE ruta_id IN (SELECT id_ruta FROM RUTA WHERE linea_id = :id);
+                DELETE FROM RUTA WHERE linea_id = :id;
+                DELETE FROM TRANSFERENCIA WHERE linea_origen_id = :id OR linea_destino_id = :id;
+                DELETE FROM LINEA_ESTACION WHERE linea_id = :id;
+                DELETE FROM LINEA WHERE id_linea = :id;
+            END;
+        """
+        execute_dml(sql_delete, {"id": id_linea})
+        return {
+            "success": True,
+            "mensaje": "Línea eliminada físicamente de forma exitosa de la base de datos.",
+            "soft_deleted": False
+        }
+    except Exception as e:
+        return {"success": False, "error": parse_oracle_error(e)}
+
+
 # ==============================================================================
 # TOPOLOGÍA: ORDEN SECUENCIAL, DISTANCIAS Y TIEMPOS (REQUERIMIENTOS 3, 4, 5 Y 9)
 # ==============================================================================
@@ -585,14 +757,33 @@ def get_estaciones_de_linea_ordenadas(id_linea: int) -> list:
     return execute_query(sql, {"id": id_linea})["rows"]
 
 
+def sincronizar_secuencia_linea_estacion() -> None:
+    """Garantiza que SEQ_LINEA_ESTACION esté por delante del máximo ID registrado en LINEA_ESTACION."""
+    try:
+        res = execute_query("SELECT NVL(MAX(id_linea_estacion), 0) AS max_id FROM LINEA_ESTACION")
+        max_id = int(res["rows"][0]["MAX_ID"]) if res["rows"] else 0
+        val_res = execute_query("SELECT SEQ_LINEA_ESTACION.NEXTVAL AS curr_val FROM dual")
+        curr_val = int(val_res["rows"][0]["CURR_VAL"]) if val_res["rows"] else 0
+        while curr_val <= max_id + 5:
+            val_res = execute_query("SELECT SEQ_LINEA_ESTACION.NEXTVAL AS curr_val FROM dual")
+            curr_val = int(val_res["rows"][0]["CURR_VAL"]) if val_res["rows"] else 0
+    except Exception:
+        pass
+
+
 def asociar_estacion_linea(id_linea: int, id_estacion: int, orden: int, distancia_km: float, tiempo_min: int) -> dict:
     """
     Requerimientos 3, 4 y 5: Asociar estación con línea definiendo su orden, distancia y tiempo.
     """
-    # Verificar si ya existe
+    # 1. Verificar si la estación ya está asociada a la línea
     chk = execute_query("SELECT id_linea_estacion FROM LINEA_ESTACION WHERE linea_id = :lid AND estacion_id = :eid", {"lid": id_linea, "eid": id_estacion})["rows"]
     if chk:
         return {"success": False, "error": "Esta estación ya forma parte del recorrido de la línea."}
+
+    # 2. Verificar si el orden secuencial ya está ocupado en la misma línea
+    chk_ord = execute_query("SELECT id_linea_estacion FROM LINEA_ESTACION WHERE linea_id = :lid AND orden = :ord", {"lid": id_linea, "ord": int(orden)})["rows"]
+    if chk_ord:
+        return {"success": False, "error": f"El orden secuencial {orden} ya está asignado a otra estación en esta línea. Asigna una posición de parada diferente."}
 
     sql = """
         INSERT INTO LINEA_ESTACION (
@@ -601,16 +792,26 @@ def asociar_estacion_linea(id_linea: int, id_estacion: int, orden: int, distanci
             SEQ_LINEA_ESTACION.NEXTVAL, :lid, :eid, :orden, :distancia, :tiempo
         )
     """
+    params = {
+        "lid": id_linea,
+        "eid": id_estacion,
+        "orden": int(orden),
+        "distancia": float(distancia_km),
+        "tiempo": int(tiempo_min)
+    }
     try:
-        execute_dml(sql, {
-            "lid": id_linea,
-            "eid": id_estacion,
-            "orden": int(orden),
-            "distancia": float(distancia_km),
-            "tiempo": int(tiempo_min)
-        })
+        execute_dml(sql, params)
         return {"success": True, "mensaje": "Estación vinculada al recorrido de la línea exitosamente."}
     except Exception as e:
+        # Autoreparación si ocurre colisión con la secuencia SEQ_LINEA_ESTACION
+        err_msg = str(e)
+        if "PK_LINEA_ESTACION" in err_msg or "ORA-00001" in err_msg:
+            sincronizar_secuencia_linea_estacion()
+            try:
+                execute_dml(sql, params)
+                return {"success": True, "mensaje": "Estación vinculada al recorrido de la línea exitosamente."}
+            except Exception as e2:
+                return {"success": False, "error": parse_oracle_error(e2)}
         return {"success": False, "error": parse_oracle_error(e)}
 
 
@@ -618,6 +819,18 @@ def modificar_tramo_linea_estacion(id_linea_estacion: int, orden: int, distancia
     """
     Requerimientos 4 y 5: Modificar el orden secuencial, distancia o tiempo de un tramo.
     """
+    # Verificar si el orden ya está tomado por otro tramo en la misma línea
+    chk_ord = execute_query("""
+        SELECT le_otro.id_linea_estacion
+        FROM LINEA_ESTACION le_act
+        JOIN LINEA_ESTACION le_otro ON le_act.linea_id = le_otro.linea_id
+        WHERE le_act.id_linea_estacion = :id
+          AND le_otro.orden = :orden
+          AND le_otro.id_linea_estacion != :id
+    """, {"id": id_linea_estacion, "orden": int(orden)})["rows"]
+    if chk_ord:
+        return {"success": False, "error": f"El orden secuencial {orden} ya está asignado a otra estación en esta línea."}
+
     sql = """
         UPDATE LINEA_ESTACION SET
             orden = :orden,
