@@ -40,4 +40,18 @@ desktop.ini
 !.vscode/settings.json
 
 scratch/
+.agents/teamwork/
 database/01_ddl/
+
+# =====================================================================
+# Tests y Reportes de Ejecución
+# =====================================================================
+tests/
+test_report.*
+
+# =====================================================================
+# Documentos Binarios y Guías Locales
+# =====================================================================
+*.docx
+docs/*.docx
+docs/GUIA_EQUIPO_SUSTENTACION.md

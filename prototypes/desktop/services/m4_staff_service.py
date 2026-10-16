@@ -11,7 +11,7 @@ Proporciona lógica de negocio y operaciones transaccionales para:
    simultáneos (Regla de negocio 9) y garantizando licencia técnica vigente (Regla 10).
 6. Resumen de KPIs y métricas del personal de la MTA.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 import re
 import oracledb
@@ -788,7 +788,8 @@ def get_turnos(
     empleado_id: Optional[int] = None,
     tipo_lugar: Optional[str] = None,
     estado_asistencia: Optional[str] = None,
-    filtro_tiempo: Optional[str] = None
+    filtro_tiempo: Optional[str] = None,
+    fecha_filter: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Retorna la programación de turnos laborales con datos del empleado,
@@ -809,8 +810,9 @@ def get_turnos(
         WHERE 1=1
     """
     params: Dict[str, Any] = {}
-    if fecha:
-        fecha_clean = str(fecha).strip()[:10]
+    target_fecha = fecha or fecha_filter
+    if target_fecha:
+        fecha_clean = str(target_fecha).strip()[:10]
         if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_clean):
             sql += " AND t.fecha = TO_DATE(:fecha, 'YYYY-MM-DD')"
             params["fecha"] = fecha_clean
@@ -1003,6 +1005,163 @@ def crear_turno(datos: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:
         conn.rollback()
         return {"success": False, "error": parse_oracle_error(exc)}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def generar_turnos_recurrentes(
+    empleado_id: int,
+    fecha_inicio: str,
+    fecha_fin: str,
+    hora_inicio: str,
+    hora_fin: str,
+    filtro_dias: str = "Lunes a Viernes",
+    tipo_lugar: str = "Estación",
+    lugar_id: Optional[int] = None,
+    funcion: str = "Servicio Operativo"
+) -> Dict[str, Any]:
+    """
+    Genera en lote la programación recurrente de turnos laborales (mensual, quincenal
+    o personalizada) para un empleado en un rango de fechas determinado.
+    Aplica filtros por días de la semana ('Lunes a Viernes', 'Fines de Semana', 'Todos los Días'),
+    detecta automáticamente traslapes y conflictos de horario mediante validar_traslape_turno,
+    y persiste la transacción en bloque (batch commit).
+    """
+    try:
+        emp_id = int(empleado_id)
+    except (ValueError, TypeError):
+        return {"success": False, "error": "ID de empleado inválido.", "creados": 0, "omitidos": 0, "mensaje": "ID de empleado inválido."}
+
+    # Validar que el empleado exista en la base de datos
+    emp_rows = _query_rows("SELECT id_empleado, nombre_completo, estado_laboral FROM EMPLEADO WHERE id_empleado = :eid", {"eid": emp_id})
+    if not emp_rows:
+        return {"success": False, "error": f"El empleado con ID {emp_id} no existe en la base de datos.", "creados": 0, "omitidos": 0, "mensaje": f"Empleado {emp_id} no encontrado."}
+
+    # Validar formato y secuencia de fechas
+    f_ini_str = str(fecha_inicio or "").strip()[:10]
+    f_fin_str = str(fecha_fin or "").strip()[:10]
+    if not f_ini_str or not f_fin_str:
+        return {"success": False, "error": "Las fechas de inicio y fin son obligatorias (formato YYYY-MM-DD).", "creados": 0, "omitidos": 0, "mensaje": "Fechas obligatorias."}
+
+    try:
+        d_ini = datetime.strptime(f_ini_str, "%Y-%m-%d").date()
+        d_fin = datetime.strptime(f_fin_str, "%Y-%m-%d").date()
+    except ValueError:
+        return {"success": False, "error": "Formato inválido en fechas de programación. Utilice formato YYYY-MM-DD.", "creados": 0, "omitidos": 0, "mensaje": "Formato de fecha inválido."}
+
+    if d_ini > d_fin:
+        return {"success": False, "error": "Rango de fechas inválido: La fecha de inicio no puede ser posterior a la fecha de fin.", "creados": 0, "omitidos": 0, "mensaje": "Rango de fechas invertido."}
+
+    # Validar formato y coherencia de horas
+    h_ini_str = str(hora_inicio or "").strip()
+    h_fin_str = str(hora_fin or "").strip()
+    if not h_ini_str or not h_fin_str:
+        return {"success": False, "error": "Las horas de inicio y fin son obligatorias (formato HH:MI).", "creados": 0, "omitidos": 0, "mensaje": "Horas obligatorias."}
+
+    try:
+        t_ini = datetime.strptime(h_ini_str, "%H:%M")
+        t_fin = datetime.strptime(h_fin_str, "%H:%M")
+    except ValueError:
+        return {"success": False, "error": "Formato inválido en horas del turno. Utilice formato HH:MI (ej. 08:00).", "creados": 0, "omitidos": 0, "mensaje": "Formato de horas inválido."}
+
+    if t_fin <= t_ini:
+        return {"success": False, "error": "La hora de fin debe ser posterior a la hora de inicio en el mismo día.", "creados": 0, "omitidos": 0, "mensaje": "Hora de fin menor o igual a inicio."}
+
+    duracion_horas = (t_fin - t_ini).total_seconds() / 3600.0
+    if duracion_horas > 16.0:
+        return {"success": False, "error": f"La duración del turno ({duracion_horas:.1f} horas) excede el límite reglamentario de 16 horas continuas.", "creados": 0, "omitidos": 0, "mensaje": "Duración excede 16 horas."}
+
+    # Normalizar filtro de días de la semana
+    filtro_norm = str(filtro_dias or "Lunes a Viernes").strip().lower()
+    if "fin" in filtro_norm:
+        allowed_weekdays = {5, 6}  # Sábado, Domingo
+    elif "todo" in filtro_norm:
+        allowed_weekdays = {0, 1, 2, 3, 4, 5, 6}  # Todos los días
+    else:
+        allowed_weekdays = {0, 1, 2, 3, 4}  # Lunes a Viernes
+
+    # Recorrer el rango e identificar fechas aplicables libres de traslapes
+    candidatos: List[str] = []
+    omitidos = 0
+    curr = d_ini
+    while curr <= d_fin:
+        if curr.weekday() in allowed_weekdays:
+            fecha_turno = curr.strftime("%Y-%m-%d")
+            conflicto = validar_traslape_turno(emp_id, fecha_turno, h_ini_str, h_fin_str)
+            if conflicto:
+                omitidos += 1
+            else:
+                candidatos.append(fecha_turno)
+        curr += timedelta(days=1)
+
+    if not candidatos:
+        if omitidos > 0:
+            return {
+                "success": True,
+                "creados": 0,
+                "omitidos": omitidos,
+                "mensaje": f"Se omitieron {omitidos} turnos recurrentes debido a conflictos de traslape horario."
+            }
+        return {
+            "success": True,
+            "creados": 0,
+            "omitidos": 0,
+            "mensaje": "No se encontraron fechas aplicables para el filtro seleccionado en el rango especificado."
+        }
+
+    # Inserción en bloque (batch commit)
+    conn = get_connection()
+    cursor = conn.cursor()
+    creados = 0
+    try:
+        for fecha_turno in candidatos:
+            cursor.execute("SELECT SEQ_TURNO.NEXTVAL FROM DUAL")
+            seq_val = int(cursor.fetchone()[0])
+            cod_turno = f"TUR-{seq_val:06d}"
+
+            sql = """
+                INSERT INTO TURNO (
+                    id_turno, codigo_turno, empleado_id, fecha,
+                    hora_inicio, hora_fin, tipo_lugar, lugar_id,
+                    funcion, estado_asistencia
+                ) VALUES (
+                    :id_turno, :codigo, :emp_id, TO_DATE(:fecha, 'YYYY-MM-DD'),
+                    TO_TIMESTAMP(:fecha || ' ' || :h_ini || ':00', 'YYYY-MM-DD HH24:MI:SS'),
+                    TO_TIMESTAMP(:fecha || ' ' || :h_fin || ':00', 'YYYY-MM-DD HH24:MI:SS'),
+                    :tipo_lugar, :lugar_id, :funcion, 'Programado'
+                )
+            """
+            params = {
+                "id_turno": seq_val,
+                "codigo": cod_turno,
+                "emp_id": emp_id,
+                "fecha": fecha_turno,
+                "h_ini": h_ini_str,
+                "h_fin": h_fin_str,
+                "tipo_lugar": str(tipo_lugar or "Estación")[:20],
+                "lugar_id": lugar_id,
+                "funcion": str(funcion or "Servicio Operativo")[:50]
+            }
+            cursor.execute(sql, params)
+            creados += 1
+
+        conn.commit()
+        return {
+            "success": True,
+            "creados": creados,
+            "omitidos": omitidos,
+            "mensaje": f"Se programaron exitosamente {creados} turnos recurrentes ({omitidos} omitidos por conflicto)."
+        }
+    except Exception as exc:
+        conn.rollback()
+        return {
+            "success": False,
+            "error": parse_oracle_error(exc),
+            "creados": 0,
+            "omitidos": omitidos,
+            "mensaje": f"Error persistiendo turnos recurrentes: {exc}"
+        }
     finally:
         cursor.close()
         conn.close()

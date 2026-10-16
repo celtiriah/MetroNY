@@ -214,6 +214,73 @@ def programar_viaje(
         conn.close()
 
 
+def sp_finalizar_viaje(
+    id_viaje: int,
+    hora_real_llegada: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Ejecuta el procedimiento canónico SP_FINALIZAR_VIAJE para completar formalmente
+    un viaje programado, registrar la hora real de llegada, acumular el odómetro
+    del tren asignado (kilometraje_acumulado) y liberar la unidad a estado 'Disponible'.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        t_llegada = None
+        if hora_real_llegada is not None:
+            if isinstance(hora_real_llegada, str) and hora_real_llegada.strip():
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        t_llegada = datetime.strptime(hora_real_llegada.strip(), fmt)
+                        break
+                    except ValueError:
+                        pass
+                if t_llegada is None:
+                    try:
+                        t_llegada = datetime.fromisoformat(hora_real_llegada.strip())
+                    except ValueError:
+                        t_llegada = None
+            elif isinstance(hora_real_llegada, datetime):
+                t_llegada = hora_real_llegada
+
+        v_km_sumados = cursor.var(oracledb.NUMBER)
+        v_nuevo_km = cursor.var(oracledb.NUMBER)
+        v_mensaje = cursor.var(str)
+
+        cursor.callproc(
+            "SP_FINALIZAR_VIAJE",
+            [int(id_viaje), t_llegada, v_km_sumados, v_nuevo_km, v_mensaje]
+        )
+        conn.commit()
+
+        val_km = v_km_sumados.getvalue()
+        km_sumados = float(val_km[0]) if isinstance(val_km, list) else float(val_km or 0.0)
+        val_nuevo = v_nuevo_km.getvalue()
+        nuevo_km = float(val_nuevo[0]) if isinstance(val_nuevo, list) else float(val_nuevo or 0.0)
+        val_msg = v_mensaje.getvalue()
+        mensaje = str(val_msg[0]) if isinstance(val_msg, list) else str(val_msg or "")
+
+        return {
+            "success": True,
+            "id_viaje": int(id_viaje),
+            "kilometros_sumados": km_sumados,
+            "nuevo_kilometraje": nuevo_km,
+            "mensaje": mensaje
+        }
+    except Exception as e:
+        conn.rollback()
+        return {
+            "success": False,
+            "id_viaje": int(id_viaje),
+            "kilometros_sumados": 0.0,
+            "nuevo_kilometraje": 0.0,
+            "error": parse_oracle_error(e)
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def crear_orden_mantenimiento(
     equipo_id: int,
     tipo_mantenimiento: str,

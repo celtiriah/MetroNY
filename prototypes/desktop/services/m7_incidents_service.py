@@ -155,7 +155,7 @@ def _validar_datos_incidente(
 ) -> Optional[str]:
     """Valida los datos requeridos para registrar un incidente."""
     tipos_validos = (
-        "Falla Mecánica", "Falla Eléctrica", "Falla de Señalización",
+        "Descarrilamiento", "Falla Mecánica", "Falla Eléctrica", "Falla de Señalización",
         "Emergencia Médica", "Accidente", "Problema de Seguridad",
         "Objeto en la Vía", "Inundación", "Incendio", "Congestión",
         "Mantenimiento no Programado"

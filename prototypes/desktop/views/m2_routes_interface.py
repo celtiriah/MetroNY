@@ -849,6 +849,10 @@ class M2RoutesInterface(QWidget):
         self.btn_programar_viaje.clicked.connect(self.handle_programar_viaje)
         bar_v.addWidget(self.btn_programar_viaje)
 
+        self.btn_finalizar_viaje = PushButton("Finalizar Viaje", tab_widget, FIF.ACCEPT)
+        self.btn_finalizar_viaje.clicked.connect(self.handle_finalizar_viaje)
+        bar_v.addWidget(self.btn_finalizar_viaje)
+
         self.btn_cancelar_viaje = PushButton("Cancelar Viaje", tab_widget, FIF.CLOSE)
         self.btn_cancelar_viaje.clicked.connect(self.handle_cancelar_viaje)
         bar_v.addWidget(self.btn_cancelar_viaje)
@@ -857,7 +861,7 @@ class M2RoutesInterface(QWidget):
         self.btn_reprogramar_viaje.clicked.connect(self.handle_reprogramar_viaje)
         bar_v.addWidget(self.btn_reprogramar_viaje)
 
-        self.btn_eliminar_viaje = PushButton("Dar de Baja (Soft-Delete)", tab_widget, FIF.DELETE)
+        self.btn_eliminar_viaje = PushButton("Dar de Baja", tab_widget, FIF.DELETE)
         self.btn_eliminar_viaje.clicked.connect(self.handle_eliminar_viaje)
         bar_v.addWidget(self.btn_eliminar_viaje)
 
@@ -1538,6 +1542,92 @@ class M2RoutesInterface(QWidget):
                 self.refresh_viajes()
             else:
                 InfoBar.error("Validacion Fallida", res.get("error", ""), parent=self, position=InfoBarPosition.TOP_RIGHT)
+
+    def handle_finalizar_viaje(self):
+        selected_rows = self.table_viajes.selectedItems()
+        if not selected_rows:
+            InfoBar.warning(
+                "Sin Selección",
+                "Selecciona un viaje para finalizarlo y liberar el tren a estado Disponible.",
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT
+            )
+            return
+        row = selected_rows[0].row()
+        item0 = self.table_viajes.item(row, 0)
+        if item0 is None:
+            return
+        v = item0.data(Qt.ItemDataRole.UserRole)
+        if not v or not isinstance(v, dict):
+            return
+        vid = _safe_int(v.get("ID_VIAJE", 0))
+        num_viaje = str(v.get("NUMERO_VIAJE", f"#{vid}"))
+        cod_tren = str(v.get("CODIGO_TREN", "tren"))
+        cod_ruta = str(v.get("CODIGO_RUTA", ""))
+        st_viaje = str(v.get("ESTADO", ""))
+
+        if st_viaje == "Completado":
+            InfoBar.warning(
+                "Viaje Ya Finalizado",
+                f"El viaje {num_viaje} ya se encuentra completado.",
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT
+            )
+            return
+        if st_viaje == "Cancelado":
+            InfoBar.warning(
+                "Viaje Cancelado",
+                f"El viaje {num_viaje} fue cancelado y no puede ser finalizado.",
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT
+            )
+            return
+
+        parent_w = self.window() if self.window() is not None else self
+        dlg = MessageBox(
+            "Finalizar Viaje y Liberar Unidad",
+            f"¿Deseas finalizar formalmente el viaje {num_viaje} (Ruta {cod_ruta})?\n\n"
+            f"Esta operación ejecutará el procedimiento canónico SP_FINALIZAR_VIAJE en Oracle DB, "
+            f"registrará la hora de llegada, sumará la distancia recorrida al odómetro "
+            f"de la unidad {cod_tren} y liberará el tren y conductor a estado 'Disponible'.",
+            parent_w
+        )
+        dlg.yesButton.setText("Finalizar y Liberar")
+        dlg.cancelButton.setText("Cancelar")
+        if not dlg.exec():
+            return
+
+        res = m2_routes_service.finalizar_viaje(vid)
+        if res.get("success"):
+            km_sumados = float(res.get("kilometros_sumados") or 0.0)
+            nuevo_km = float(res.get("nuevo_kilometraje") or 0.0)
+            msg_base = res.get("mensaje") or f"Viaje {num_viaje} finalizado exitosamente."
+            if km_sumados > 0:
+                content_msg = f"{msg_base}\n(+{km_sumados:.2f} km sumados | Odómetro actual: {nuevo_km:,.2f} km)"
+            else:
+                content_msg = str(msg_base)
+
+            InfoBar.success(
+                "Viaje Finalizado",
+                content_msg,
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000
+            )
+            if self.combo_filtro_estado_viaje.currentText() not in ("(Todos)", "Completado"):
+                self.combo_filtro_estado_viaje.blockSignals(True)
+                self.combo_filtro_estado_viaje.setCurrentText("(Todos)")
+                self.combo_filtro_estado_viaje.blockSignals(False)
+
+            self.highlight_viaje_id = vid
+            self.refresh_viajes()
+        else:
+            InfoBar.error(
+                "Error al Finalizar Viaje",
+                str(res.get("error") or "Error desconocido al procesar la finalización."),
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT
+            )
 
     def handle_cancelar_viaje(self):
         selected_rows = self.table_viajes.selectedItems()

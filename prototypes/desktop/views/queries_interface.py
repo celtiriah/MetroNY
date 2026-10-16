@@ -181,6 +181,12 @@ class QueriesInterface(QWidget):
         # Load initial query
         self.on_query_changed(0)
 
+    def refresh_lookups(self):
+        """Refresca los selectores dinámicos y la vista previa SQL con los datos vigentes de Oracle."""
+        idx = self.query_combo.currentIndex()
+        if idx >= 0:
+            self.on_query_changed(idx)
+
     def _update_desc_style(self):
         dark = isDarkTheme()
         color = "#4da6ff" if dark else "#0039A6"

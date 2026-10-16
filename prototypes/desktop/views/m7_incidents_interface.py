@@ -81,7 +81,7 @@ class RegistrarIncidenteDialog(MessageBoxBase):
         # 1. Tipo
         self.combo_tipo = ComboBox(self)
         self.combo_tipo.addItems([
-            "Falla Mecánica", "Falla Eléctrica", "Falla de Señalización",
+            "Descarrilamiento", "Falla Mecánica", "Falla Eléctrica", "Falla de Señalización",
             "Emergencia Médica", "Accidente", "Problema de Seguridad",
             "Objeto en la Vía", "Inundación", "Incendio", "Congestión",
             "Mantenimiento no Programado"

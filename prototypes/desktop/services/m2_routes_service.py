@@ -13,7 +13,12 @@ import re
 import oracledb
 
 from services.db import get_connection, execute_query
-from services.actions_service import parse_oracle_error, programar_viaje as sp_programar_viaje, cancelar_viajes_afectados as sp_cancelar_viajes
+from services.actions_service import (
+    parse_oracle_error,
+    programar_viaje as sp_programar_viaje,
+    cancelar_viajes_afectados as sp_cancelar_viajes,
+    sp_finalizar_viaje
+)
 
 
 def _query_rows(sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -623,6 +628,15 @@ def cancelar_viaje(id_viaje: int) -> Dict[str, Any]:
     finally:
         cursor.close()
         conn.close()
+
+
+def finalizar_viaje(id_viaje: int, hora_real_llegada: Optional[Any] = None) -> Dict[str, Any]:
+    """
+    Finaliza formalmente un viaje programado delegando en el procedimiento canónico
+    SP_FINALIZAR_VIAJE. Registra hora real de llegada, acumula el odómetro del tren
+    y libera la unidad rodante a estado 'Disponible'.
+    """
+    return sp_finalizar_viaje(id_viaje=int(id_viaje), hora_real_llegada=hora_real_llegada)
 
 
 def reprogramar_viaje(id_viaje: int, nueva_fecha: str, nueva_salida: str, nueva_llegada: str) -> Dict[str, Any]:

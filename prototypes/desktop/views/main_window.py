@@ -255,6 +255,8 @@ class MetroFluentApp(FluentWindow):
                 self.maintenance_interface.load_maintenance_data()
             elif widget is self.incidents_interface:
                 self.incidents_interface.load_incidents_data()
+            elif widget is self.queries_interface:
+                self.queries_interface.refresh_lookups()
             self._loaded_interfaces.add(widget)
         except Exception as e:
             self.notify(

@@ -120,8 +120,16 @@ def get_equipos(
                    WHEN eq.tipo_referencia = 'PLATAFORMA' THEN (SELECT p.identificador FROM PLATAFORMA p WHERE p.id_plataforma = eq.referencia_id)
                    WHEN eq.tipo_referencia = 'VAGON' THEN (SELECT v.numero_serie FROM VAGON v WHERE v.id_vagon = eq.referencia_id)
                    ELSE 'General'
-               END AS referencia_nombre
+               END AS referencia_nombre,
+               t.codigo_interno AS tren_codigo,
+               mt.nombre_modelo AS tren_modelo,
+               dep.nombre AS tren_deposito,
+               est.nombre AS estacion_nombre
         FROM EQUIPO eq
+        LEFT JOIN TREN t ON eq.referencia_id = t.id_tren AND eq.tipo_referencia = 'TREN'
+        LEFT JOIN MODELO_TREN mt ON t.modelo_id = mt.id_modelo
+        LEFT JOIN DEPOSITO dep ON t.deposito_id = dep.id_deposito
+        LEFT JOIN ESTACION est ON eq.referencia_id = est.id_estacion AND eq.tipo_referencia = 'ESTACION'
         WHERE 1 = 1
     """
     params: Dict[str, Any] = {}
@@ -145,6 +153,21 @@ def get_equipos(
 
     sql += " ORDER BY eq.id_equipo DESC"
     return execute_query(sql, params)["rows"]
+
+
+def get_equipos_por_categoria(categoria: str) -> List[Dict[str, Any]]:
+    """
+    Retorna la lista de activos filtrados segun la categoria seleccionada:
+    - 'Tren' o 'Tren (Material Rodante)': tipo_referencia = 'TREN'
+    - 'Estación' o 'Estación / Infraestructura': tipo_referencia = 'ESTACION'
+    """
+    equipos = get_equipos()
+    cat_upper = categoria.upper()
+    if "TREN" in cat_upper or "RODANTE" in cat_upper:
+        return [eq for eq in equipos if str(eq.get("TIPO_REFERENCIA", "")).upper() == "TREN"]
+    elif "ESTACI" in cat_upper or "INFRA" in cat_upper:
+        return [eq for eq in equipos if str(eq.get("TIPO_REFERENCIA", "")).upper() == "ESTACION"]
+    return equipos
 
 
 def get_equipo_by_id(id_equipo: int) -> Optional[Dict[str, Any]]:
@@ -503,24 +526,51 @@ def crear_orden(
     tipo_mantenimiento: str,
     descripcion: str,
     prioridad: str = "Media",
-    tecnico_id: Optional[int] = None
+    tecnico_id: Optional[int] = None,
+    componente: Optional[str] = None,
+    repuesto_id: Optional[int] = None,
+    cantidad_repuesto: int = 0
 ) -> Dict[str, Any]:
     """
     Crea una nueva orden de mantenimiento invocando el procedimiento canonico
     SP_CREAR_ORDEN_MANTENIMIENTO.
+    Soporta especificacion de componente y consumo upfront de repuestos.
     Actualiza automaticamente el estado del equipo y tren a 'En Mantenimiento'.
     """
-    err = _validar_datos_orden(equipo_id, tipo_mantenimiento, descripcion, prioridad)
+    desc = descripcion.strip()
+    if componente and componente.strip():
+        comp_tag = f"[{componente.strip()}]"
+        if not desc.startswith(comp_tag):
+            desc = f"{comp_tag} {desc}"
+
+    err = _validar_datos_orden(equipo_id, tipo_mantenimiento, desc, prioridad)
     if err:
         return {"success": False, "error": err}
 
-    return sp_crear_orden_mantenimiento(
+    res = sp_crear_orden_mantenimiento(
         equipo_id=int(equipo_id),
         tipo_mantenimiento=tipo_mantenimiento,
-        descripcion=descripcion.strip(),
+        descripcion=desc,
         prioridad=prioridad,
         tecnico_id=int(tecnico_id) if tecnico_id else None
     )
+
+    if not res.get("success"):
+        return res
+
+    id_orden = res.get("id_orden")
+    if id_orden and repuesto_id and cantidad_repuesto > 0:
+        rep_res = registrar_consumo_repuesto(
+            orden_id=int(id_orden),
+            repuesto_id=int(repuesto_id),
+            cantidad=int(cantidad_repuesto)
+        )
+        res["repuesto_resultado"] = rep_res
+        if not rep_res.get("success"):
+            err_rep = rep_res.get("error", "Error desconocido")
+            res["advertencia_repuesto"] = f"Orden creada pero falló el registro del repuesto: {err_rep}"
+
+    return res
 
 
 def cambiar_estado_orden(id_orden: int, nuevo_estado: str) -> Dict[str, Any]:

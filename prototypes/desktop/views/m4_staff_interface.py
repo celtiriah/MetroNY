@@ -10,7 +10,7 @@ Cumple estrictamente con los 8 requerimientos del enunciado y las reglas de nego
 7. Detectar e impedir traslapes de turnos laborales para un mismo empleado.
 8. Registrar ausencias y gestionar sustituciones de personal operativo.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
 from PyQt5.QtCore import Qt, QDate
@@ -607,6 +607,148 @@ class TurnoDialog(MessageBoxBase):
         }
 
 
+class ProgramarTurnosRecurrentesDialog(MessageBoxBase):
+    """Diálogo modal para programar turnos masivos/recurrentes (mensual, quincenal)."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel("Programación Recurrente de Turnos", self)
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.setSpacing(10)
+
+        self.viewLayout.addWidget(CaptionLabel(
+            "Permite generar en un solo clic la plantilla mensual o periódica de turnos\n"
+            "para el empleado seleccionado, con filtros por días y validación de traslapes.", self
+        ))
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        # 1. Empleado
+        self.combo_emp = ComboBox(self)
+        empleados = m4_staff_service.get_empleados(estado_filter="Activo")
+        for e in empleados:
+            e_id = _safe_int(e.get("ID_EMPLEADO", 0))
+            label = f"{e.get('NOMBRE_COMPLETO', '')} ({e.get('CARGO', '')})"
+            self.combo_emp.addItem(label, userData=e_id)
+        form.addRow("Empleado Asignado:", self.combo_emp)
+
+        # 2. Rango de Fechas (Fecha Inicio y Fecha Fin)
+        hoy = date.today()
+        fin_mes = hoy + timedelta(days=30)
+        self.picker_fecha_inicio = create_calendar_picker(self, initial_date=hoy, allow_reset=False)
+        form.addRow("Fecha de Inicio:", self.picker_fecha_inicio)
+
+        self.picker_fecha_fin = create_calendar_picker(self, initial_date=fin_mes, allow_reset=False)
+        form.addRow("Fecha de Fin:", self.picker_fecha_fin)
+
+        # 3. Filtro de Días de la Semana
+        self.combo_filtro_dias = ComboBox(self)
+        self.combo_filtro_dias.addItems(["Lunes a Viernes", "Fines de Semana", "Todos los Días"])
+        form.addRow("Días Laborables:", self.combo_filtro_dias)
+
+        # 4. Horas de Inicio y Fin
+        self.picker_h_ini = create_time_picker(self, initial_time="08:00", allow_reset=False, show_seconds=False)
+        form.addRow("Hora Inicio:", self.picker_h_ini)
+
+        self.picker_h_fin = create_time_picker(self, initial_time="16:00", allow_reset=False, show_seconds=False)
+        form.addRow("Hora Fin:", self.picker_h_fin)
+
+        # 5. Tipo de Lugar y Función
+        self.combo_lugar = ComboBox(self)
+        lugares = ["Estación", "Depósito", "Tren", "Centro de Control", "Ruta"]
+        self.combo_lugar.addItems(lugares)
+        form.addRow("Tipo de Lugar:", self.combo_lugar)
+
+        self.txt_funcion = LineEdit(self)
+        self.txt_funcion.setPlaceholderText("p.ej. Turno Recurrente Mensual, Servicio Operativo...")
+        self.txt_funcion.setText("Turno Recurrente Mensual")
+        form.addRow("Función Operativa:", self.txt_funcion)
+
+        self.viewLayout.addLayout(form)
+
+        # Etiqueta de aviso / error de validación
+        self.lbl_error = CaptionLabel("", self)
+        self.lbl_error.setStyleSheet("color: #cf1010; font-weight: 600; padding: 4px 0;")
+        self.lbl_error.hide()
+        self.viewLayout.addWidget(self.lbl_error)
+
+        self.yesButton.setText("Generar Turnos")
+        self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(460)
+
+    def validate(self) -> bool:
+        emp_id = self.combo_emp.currentData()
+        if emp_id is None:
+            self.lbl_error.setText("Debe seleccionar un empleado para programar los turnos.")
+            self.lbl_error.show()
+            self.combo_emp.setFocus()
+            return False
+
+        qdate_ini = self.picker_fecha_inicio.getDate()
+        qdate_fin = self.picker_fecha_fin.getDate()
+
+        if not qdate_ini.isValid():
+            self.lbl_error.setText("La fecha de inicio del rango es obligatoria.")
+            self.lbl_error.show()
+            self.picker_fecha_inicio.setFocus()
+            return False
+
+        if not qdate_fin.isValid():
+            self.lbl_error.setText("La fecha de fin del rango es obligatoria.")
+            self.lbl_error.show()
+            self.picker_fecha_fin.setFocus()
+            return False
+
+        if qdate_fin < qdate_ini:
+            self.lbl_error.setText("La fecha de fin debe ser igual o posterior a la fecha de inicio.")
+            self.lbl_error.show()
+            self.picker_fecha_fin.setFocus()
+            return False
+
+        t_ini = self.picker_h_ini.getTime()
+        t_fin = self.picker_h_fin.getTime()
+
+        if not t_ini.isValid():
+            self.lbl_error.setText("La hora de inicio del turno es obligatoria.")
+            self.lbl_error.show()
+            self.picker_h_ini.setFocus()
+            return False
+
+        if not t_fin.isValid():
+            self.lbl_error.setText("La hora de fin del turno es obligatoria.")
+            self.lbl_error.show()
+            self.picker_h_fin.setFocus()
+            return False
+
+        if t_fin <= t_ini:
+            self.lbl_error.setText("La hora de fin debe ser posterior a la hora de inicio en el mismo día.")
+            self.lbl_error.show()
+            self.picker_h_fin.setFocus()
+            return False
+
+        duracion_horas = t_ini.msecsTo(t_fin) / (1000.0 * 3600.0)
+        if duracion_horas > 16.0:
+            self.lbl_error.setText(f"La duración ({duracion_horas:.1f} h) excede el límite máximo de 16 horas continuas (normativa MTA).")
+            self.lbl_error.show()
+            self.picker_h_fin.setFocus()
+            return False
+
+        self.lbl_error.hide()
+        return True
+
+    def get_data(self) -> Dict[str, Any]:
+        return {
+            "empleado_id": self.combo_emp.currentData(),
+            "fecha_inicio": qdate_to_iso(self.picker_fecha_inicio.getDate()),
+            "fecha_fin": qdate_to_iso(self.picker_fecha_fin.getDate()),
+            "hora_inicio": qtime_to_str(self.picker_h_ini.getTime()) or "08:00",
+            "hora_fin": qtime_to_str(self.picker_h_fin.getTime()) or "16:00",
+            "filtro_dias": self.combo_filtro_dias.currentText(),
+            "tipo_lugar": self.combo_lugar.currentText(),
+            "funcion": self.txt_funcion.text().strip() or "Turno Recurrente Mensual"
+        }
+
+
 class AsistenciaDialog(MessageBoxBase):
     """Diálogo modal para registrar asistencia rápida de un turno."""
     def __init__(self, cod_turno: str, nom_emp: str, est_actual: str, parent=None):
@@ -1058,6 +1200,10 @@ class StaffInterface(QWidget):
         self.btn_nuevo_turno = PrimaryPushButton("Programar Turno", tab_widget, FIF.ADD)
         self.btn_nuevo_turno.clicked.connect(self.handle_nuevo_turno)
         bar_actions.addWidget(self.btn_nuevo_turno)
+
+        self.btn_turnos_recurrentes = PushButton("Turnos Recurrentes / Mensual", tab_widget, FIF.CALENDAR)
+        self.btn_turnos_recurrentes.clicked.connect(self.handle_turnos_recurrentes)
+        bar_actions.addWidget(self.btn_turnos_recurrentes)
 
         self.btn_modificar_turno = PushButton("Modificar Turno", tab_widget, FIF.EDIT)
         self.btn_modificar_turno.clicked.connect(self.handle_modificar_turno)
@@ -1801,6 +1947,46 @@ class StaffInterface(QWidget):
                 InfoBar.error(
                     title="Conflicto de Programación",
                     content=res.get("error", "No se pudo programar el turno."),
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=5000
+                )
+
+    def handle_turnos_recurrentes(self):
+        dlg = ProgramarTurnosRecurrentesDialog(parent=self.window())
+        if dlg.exec():
+            if not dlg.validate():
+                return
+            datos = dlg.get_data()
+            emp_id = datos.get("empleado_id")
+            if emp_id is None:
+                return
+            res = m4_staff_service.generar_turnos_recurrentes(
+                empleado_id=int(emp_id),
+                fecha_inicio=str(datos.get("fecha_inicio", "")),
+                fecha_fin=str(datos.get("fecha_fin", "")),
+                hora_inicio=str(datos.get("hora_inicio", "08:00")),
+                hora_fin=str(datos.get("hora_fin", "16:00")),
+                filtro_dias=str(datos.get("filtro_dias", "Lunes a Viernes")),
+                tipo_lugar=str(datos.get("tipo_lugar", "Estación")),
+                funcion=str(datos.get("funcion", "Turno Recurrente Mensual"))
+            )
+            if res.get("success"):
+                creados = _safe_int(res.get("creados"))
+                omitidos = _safe_int(res.get("omitidos"))
+                InfoBar.success(
+                    title="Programación Recurrente Completada",
+                    content=f"Se generaron exitosamente {creados} turnos recurrentes ({omitidos} omitidos por conflicto de traslape).",
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=5000
+                )
+                self.refresh_turnos()
+                self.refresh_kpis()
+            else:
+                InfoBar.error(
+                    title="Error en Programación Recurrente",
+                    content=str(res.get("error", "No se pudieron generar los turnos.")),
                     parent=self.window(),
                     position=InfoBarPosition.TOP_RIGHT,
                     duration=5000

@@ -67,12 +67,56 @@ def _safe_str(val: Any, default: str = "-") -> str:
 # DIALOGOS MODALES (MessageBoxBase)
 # ==============================================================================
 
+COMPONENTES_TREN = [
+    "Frenos",
+    "Bogies",
+    "Neumática",
+    "Tracción",
+    "Pantógrafo / Tercer Riel",
+    "Puertas de Pasajeros",
+    "HVAC / Climatización",
+    "Sistemas Eléctricos",
+    "Señalización a Bordo"
+]
+
+COMPONENTES_ESTACION = [
+    "Vía / Riel",
+    "Señalización de Campo",
+    "Elevador",
+    "Escalera Eléctrica",
+    "Torniquete OMNY",
+    "Subestación Eléctrica",
+    "Andén"
+]
+
+
 class NuevaOrdenDialog(MessageBoxBase):
     """Dialogo modal para generar una nueva orden de mantenimiento con SP_CREAR_ORDEN_MANTENIMIENTO."""
-    def __init__(self, equipos: List[Dict[str, Any]], tecnicos: List[Dict[str, Any]], parent=None):
-        super().__init__(parent)
+    def __init__(
+        self,
+        equipos: List[Dict[str, Any]],
+        tecnicos: List[Dict[str, Any]],
+        parent=None,
+        repuestos: Optional[List[Dict[str, Any]]] = None
+    ):
+        # Permitir paso de argumentos flexible (equipos, tecnicos, parent) o (equipos, tecnicos, repuestos, parent)
+        if isinstance(parent, list):
+            actual_repuestos = parent
+            actual_parent = repuestos if not isinstance(repuestos, list) else None
+        else:
+            actual_parent = parent
+            actual_repuestos = repuestos
+
+        if actual_parent is None:
+            actual_parent = QApplication.activeWindow()
+            if actual_parent is None:
+                self._dummy_parent = QWidget()
+                actual_parent = self._dummy_parent
+
+        super().__init__(actual_parent)
         self.equipos = equipos
         self.tecnicos = tecnicos
+        self.repuestos = actual_repuestos if actual_repuestos is not None else m6_maintenance_service.get_catalogo_repuestos()
         self.init_ui()
 
     def init_ui(self):
@@ -82,28 +126,35 @@ class NuevaOrdenDialog(MessageBoxBase):
         form = QFormLayout()
         form.setSpacing(10)
 
-        # 1. Selector de Equipo
+        # 1. Selector de Categoria de Activo
+        self.combo_categoria_activo = ComboBox(self)
+        self.combo_categoria_activo.addItems(["Tren (Material Rodante)", "Estación / Infraestructura"])
+        form.addRow("Categoría del Activo:", self.combo_categoria_activo)
+
+        # 2. Selector dinamico de Activo / Equipo
         self.combo_equipo = ComboBox(self)
-        for eq in self.equipos:
-            codigo = _safe_str(eq.get("CODIGO_EQUIPO"))
-            tipo = _safe_str(eq.get("TIPO_EQUIPO"))
-            ubic = _safe_str(eq.get("UBICACION"))
-            id_eq = _safe_int(eq.get("ID_EQUIPO"))
-            self.combo_equipo.addItem(f"{codigo} ({tipo}) - {ubic}", userData=id_eq)
         form.addRow("Activo / Equipo:", self.combo_equipo)
 
-        # 2. Tipo de Mantenimiento
+        # 3. Selector de Componente / Subsistema
+        self.combo_componente = ComboBox(self)
+        form.addRow("Componente / Subsistema:", self.combo_componente)
+
+        # Poblar inicialmente equipos y componentes segun categoria por defecto
+        self._on_categoria_changed(self.combo_categoria_activo.currentText())
+        self.combo_categoria_activo.currentTextChanged.connect(self._on_categoria_changed)
+
+        # 4. Tipo de Mantenimiento
         self.combo_tipo = ComboBox(self)
         self.combo_tipo.addItems(["Preventivo", "Correctivo", "Predictivo", "Inspección de Seguridad"])
         form.addRow("Tipo de Trabajo:", self.combo_tipo)
 
-        # 3. Prioridad
+        # 5. Prioridad
         self.combo_prioridad = ComboBox(self)
         self.combo_prioridad.addItems(["Baja", "Media", "Alta", "Urgente"])
         self.combo_prioridad.setCurrentText("Media")
         form.addRow("Nivel de Prioridad:", self.combo_prioridad)
 
-        # 4. Tecnico Lider
+        # 6. Tecnico Lider
         self.combo_tecnico = ComboBox(self)
         self.combo_tecnico.addItem("(Sin asignar líder inicialmente)", userData=None)
         for tec in self.tecnicos:
@@ -113,7 +164,27 @@ class NuevaOrdenDialog(MessageBoxBase):
             self.combo_tecnico.addItem(f"{nom} ({num})", userData=id_emp)
         form.addRow("Técnico Responsable:", self.combo_tecnico)
 
-        # 5. Descripcion
+        # 7. Selector de Repuesto Inicial (Upfront Spare Part)
+        self.combo_repuesto = ComboBox(self)
+        self.combo_repuesto.addItem("(Ninguno / Sin repuesto inicial)", userData=None)
+        for rep in self.repuestos:
+            cod = _safe_str(rep.get("CODIGO"))
+            nom = _safe_str(rep.get("NOMBRE"))
+            stk = _safe_int(rep.get("STOCK_DISPONIBLE") or rep.get("STOCK_ACTUAL"))
+            costo = _safe_float(rep.get("COSTO_UNITARIO"))
+            id_rep = _safe_int(rep.get("ID_REPUESTO"))
+            self.combo_repuesto.addItem(f"{cod} - {nom} (Stock: {stk}, ${costo:.2f})", userData=id_rep)
+        form.addRow("Repuesto Inicial:", self.combo_repuesto)
+
+        # 8. Cantidad de Repuesto
+        self.spin_cantidad_repuesto = SpinBox(self)
+        self.spin_cantidad_repuesto.setRange(1, 999)
+        self.spin_cantidad_repuesto.setValue(1)
+        self.spin_cantidad_repuesto.setEnabled(False)
+        self.combo_repuesto.currentIndexChanged.connect(self._on_repuesto_changed)
+        form.addRow("Cantidad de Repuesto:", self.spin_cantidad_repuesto)
+
+        # 9. Descripcion
         self.txt_descripcion = LineEdit(self)
         self.txt_descripcion.setPlaceholderText("Detalle de las tareas tecnicas a realizar...")
         form.addRow("Descripción:", self.txt_descripcion)
@@ -127,13 +198,55 @@ class NuevaOrdenDialog(MessageBoxBase):
         self.viewLayout.addLayout(form)
         self.yesButton.setText("Generar Orden")
         self.cancelButton.setText("Cancelar")
-        self.widget.setMinimumWidth(520)
+        self.widget.setMinimumWidth(560)
 
         self.yesButton.clicked.disconnect()
         self.yesButton.clicked.connect(self._on_confirm)
 
+    def _on_categoria_changed(self, categoria: str):
+        self.combo_equipo.clear()
+        self.combo_componente.clear()
+        cat_upper = categoria.upper()
+        es_tren = ("TREN" in cat_upper or "RODANTE" in cat_upper)
+
+        if es_tren:
+            self.combo_componente.addItems(COMPONENTES_TREN)
+            tren_equipos = [
+                eq for eq in self.equipos
+                if str(eq.get("TIPO_REFERENCIA", "")).upper() == "TREN" or str(eq.get("TIPO_EQUIPO", "")).lower() == "tren"
+            ]
+            for eq in tren_equipos:
+                cod_eq = _safe_str(eq.get("CODIGO_EQUIPO"))
+                tren_cod = _safe_str(eq.get("TREN_CODIGO") or eq.get("REFERENCIA_NOMBRE"))
+                if tren_cod == "-":
+                    tren_cod = cod_eq
+                tren_mod = _safe_str(eq.get("TREN_MODELO") or eq.get("MODELO") or eq.get("EQUIPO_MODELO"))
+                tren_dep = _safe_str(eq.get("TREN_DEPOSITO") or eq.get("UBICACION"))
+                id_eq = _safe_int(eq.get("ID_EQUIPO"))
+                label = f"{tren_cod} ({tren_mod}) - {tren_dep} [{cod_eq}]"
+                self.combo_equipo.addItem(label, userData=id_eq)
+        else:
+            self.combo_componente.addItems(COMPONENTES_ESTACION)
+            est_equipos = [
+                eq for eq in self.equipos
+                if str(eq.get("TIPO_REFERENCIA", "")).upper() != "TREN"
+            ]
+            for eq in est_equipos:
+                cod_eq = _safe_str(eq.get("CODIGO_EQUIPO"))
+                tipo_eq = _safe_str(eq.get("TIPO_EQUIPO"))
+                est_nom = _safe_str(eq.get("ESTACION_NOMBRE") or eq.get("REFERENCIA_NOMBRE"))
+                ubic = _safe_str(eq.get("UBICACION"))
+                id_eq = _safe_int(eq.get("ID_EQUIPO"))
+                label = f"{est_nom} - {tipo_eq} ({cod_eq}) [{ubic}]"
+                self.combo_equipo.addItem(label, userData=id_eq)
+
+    def _on_repuesto_changed(self):
+        rep_data = self.combo_repuesto.currentData()
+        self.spin_cantidad_repuesto.setEnabled(rep_data is not None)
+
     def validate(self) -> bool:
-        if not self.combo_equipo.currentData():
+        eq_data = self.combo_equipo.currentData()
+        if eq_data is None:
             self.lbl_error.setText("Debe seleccionar un activo o equipo válido.")
             self.lbl_error.show()
             return False
@@ -148,8 +261,46 @@ class NuevaOrdenDialog(MessageBoxBase):
             self.lbl_error.show()
             self.txt_descripcion.setFocus()
             return False
+
+        rep_data = self.combo_repuesto.currentData()
+        if rep_data is not None and self.spin_cantidad_repuesto.value() <= 0:
+            self.lbl_error.setText("La cantidad del repuesto debe ser mayor a cero.")
+            self.lbl_error.show()
+            return False
+
         self.lbl_error.hide()
         return True
+
+    def get_equipo_id(self) -> Optional[int]:
+        data = self.combo_equipo.currentData()
+        return int(data) if data is not None else None
+
+    def get_componente(self) -> str:
+        return self.combo_componente.currentText()
+
+    def get_descripcion(self) -> str:
+        comp = self.get_componente()
+        raw = self.txt_descripcion.text().strip()
+        if comp and not raw.startswith(f"[{comp}]"):
+            return f"[{comp}] {raw}"
+        return raw
+
+    def get_repuesto_id(self) -> Optional[int]:
+        data = self.combo_repuesto.currentData()
+        return int(data) if data is not None else None
+
+    def get_cantidad_repuesto(self) -> int:
+        return self.spin_cantidad_repuesto.value()
+
+    def get_tipo_mantenimiento(self) -> str:
+        return self.combo_tipo.currentText()
+
+    def get_prioridad(self) -> str:
+        return self.combo_prioridad.currentText()
+
+    def get_tecnico_id(self) -> Optional[int]:
+        data = self.combo_tecnico.currentData()
+        return int(data) if data is not None else None
 
     def _on_confirm(self):
         if self.validate():
@@ -953,36 +1104,46 @@ class MaintenanceInterface(QWidget):
     def handle_nueva_orden(self):
         equipos = m6_maintenance_service.get_equipos()
         tecnicos = m6_maintenance_service.get_tecnicos_disponibles()
+        repuestos = m6_maintenance_service.get_catalogo_repuestos()
         if not equipos:
             InfoBar.warning("Sin Equipos", "No hay activos de infraestructura registrados.", parent=self.window(), duration=3000)
             return
 
-        dialog = NuevaOrdenDialog(equipos, tecnicos, self.window())
+        dialog = NuevaOrdenDialog(equipos, tecnicos, parent=self.window(), repuestos=repuestos)
         if dialog.exec():
             if not dialog.validate():
-                InfoBar.warning("Validación", "Complete la descripción de la orden.", parent=self.window(), duration=3000)
+                InfoBar.warning("Validación", "Complete la información de la orden.", parent=self.window(), duration=3000)
                 return
 
-            id_eq = dialog.combo_equipo.currentData()
+            id_eq = dialog.get_equipo_id()
             if id_eq is None:
                 return
-            tipo = dialog.combo_tipo.currentText()
-            prio = dialog.combo_prioridad.currentText()
-            tec_id = dialog.combo_tecnico.currentData()
-            desc = dialog.txt_descripcion.text()
+            tipo = dialog.get_tipo_mantenimiento()
+            prio = dialog.get_prioridad()
+            tec_id = dialog.get_tecnico_id()
+            desc = dialog.get_descripcion()
+            comp = dialog.get_componente()
+            rep_id = dialog.get_repuesto_id()
+            cant_rep = dialog.get_cantidad_repuesto() if rep_id is not None else 0
 
             res = m6_maintenance_service.crear_orden(
                 equipo_id=int(id_eq),
                 tipo_mantenimiento=tipo,
                 descripcion=desc,
                 prioridad=prio,
-                tecnico_id=int(tec_id) if tec_id is not None else None
+                tecnico_id=int(tec_id) if tec_id is not None else None,
+                componente=comp,
+                repuesto_id=int(rep_id) if rep_id is not None else None,
+                cantidad_repuesto=int(cant_rep)
             )
 
             if res.get("success"):
+                msg = f"Orden {res.get('numero_orden')} creada exitosamente para {comp}. El activo fue colocado en mantenimiento."
+                if rep_id and res.get("repuesto_resultado", {}).get("success"):
+                    msg += " Repuesto registrado correctamente."
                 InfoBar.success(
                     "Orden Generada",
-                    f"Orden {res.get('numero_orden')} creada exitosamente. El activo fue colocado en mantenimiento.",
+                    msg,
                     parent=self.window(),
                     position=InfoBarPosition.TOP_RIGHT,
                     duration=4000
